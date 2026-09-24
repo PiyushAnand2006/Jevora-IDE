@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Build Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Main Application Layout -->
+  <div class="app-container">
+    
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <div class="top-bar-left">
+        <h1 class="screen-title">Build Agent</h1>
+        <button class="history-link" id="historyBtn" type="button">History</button>
+      </div>
+
+      <!-- Mode Selector Tabs -->
+      <nav class="mode-tabs" aria-label="Workflow Modes">
+        <button class="mode-tab active" data-mode="build" type="button">Build</button>
+        <button class="mode-tab" data-mode="chat" type="button">Chat</button>
+        <button class="mode-tab" data-mode="general" type="button">General</button>
+        <button class="mode-tab" data-mode="analysis" type="button">Analysis</button>
+      </nav>
+
+      <!-- Right Action: Sidebar Toggle Button -->
+      <div class="top-bar-right">
+        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" type="button" aria-label="Toggle Context & Tools panel" title="Toggle Context & Tools">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="18" x="3" y="3" rx="4"></rect>
+            <path d="M15 3v18"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+
+      <!-- Left Sidebar Panel -->
+      <aside class="left-sidebar">
+        <!-- Left Sidebar Tabs -->
+        <div class="left-tabs">
+          <button class="left-tab active" data-left-tab="build" type="button">Build</button>
+          <button class="left-tab" data-left-tab="agent" type="button">Agent</button>
+        </div>
+
+        <!-- Build Tab Content -->
+        <div class="left-tab-content active" id="leftTabBuild">
+          <button class="left-action-row" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            <span>New task</span>
+            <kbd class="shortcut-badge">Ctrl+N</kbd>
+          </button>
+          <button class="left-action-row" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Search</span>
+            <kbd class="shortcut-badge">Ctrl+K</kbd>
+          </button>
+          <button class="left-action-row" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>Automations</span>
+          </button>
+          <button class="left-action-row" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <span>Plugin Marketplace</span>
+          </button>
+
+          <div class="left-divider"></div>
+
+          <!-- Group / Project Toggle -->
+          <div class="left-filter-row">
+            <div class="filter-toggle">
+              <button class="filter-btn active" type="button"># Group</button>
+              <button class="filter-btn" type="button">📁 Project</button>
+            </div>
+          </div>
+
+          <!-- Projects Section -->
+          <div class="left-section">
+            <span class="left-section-label">Projects</span>
+            <p class="left-muted-text">No open projects</p>
+          </div>
+
+          <!-- Tasks Section -->
+          <div class="left-section">
+            <span class="left-section-label">Tasks</span>
+            <p class="left-muted-text">No active tasks</p>
+          </div>
+        </div>
+
+        <!-- Agent Tab Content -->
+        <div class="left-tab-content" id="leftTabAgent">
+          <div class="agent-empty-state">
+            <div class="agent-empty-layers">
+              <p class="agent-empty-line line-1">Create your own</p>
+              <p class="agent-empty-line line-2">agent now</p>
+              <p class="agent-empty-sub">Design custom agents with any LLM model, specialized tools, and unique system prompts — tailored to your exact workflow.</p>
+            </div>
+          </div>
+
+          <!-- Floating Create Agent Button -->
+          <button class="create-agent-fab" id="createAgentBtn" type="button" aria-label="Create new agent" title="Create a new agent">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Agent Column (Flexible) -->
+      <section class="agent-column">
+        
+        <!-- Agent Output Panel -->
+        <div class="agent-output-panel" id="agentOutputPanel">
+          <div class="empty-state" id="emptyState">
+            <p class="placeholder-text">Agent output will appear here</p>
+          </div>
+
+          <div class="stream-container" id="streamContainer" style="display: none;"></div>
+        </div>
+
+        <!-- Input Row -->
+        <div class="input-row-container">
+          
+          <!-- Attach Menu Popover (Anchored above '+' button) -->
+          <div class="attach-menu-popover" id="attachMenu">
+            <button class="attach-menu-item" data-action="files" type="button">
+              <span class="menu-dot"></span>
+              <span class="menu-label">Files</span>
+            </button>
+            <button class="attach-menu-item" data-action="photos" type="button">
+              <span class="menu-dot"></span>
+              <span class="menu-label">Photos</span>
+            </button>
+            <div class="attach-menu-item disabled" title="Web search is not available yet" aria-disabled="true">
+              <span class="menu-dot disabled-dot"></span>
+              <span class="menu-label struck">Web search</span>
+            </div>
+            <button class="attach-menu-item" data-action="commands" type="button">
+              <span class="menu-prefix">/</span>
+              <span class="menu-label">Commands</span>
+            </button>
+          </div>
+
+          <!-- Bottom Chat Row -->
+          <div class="input-row">
+            <button class="attach-btn" id="attachToggleBtn" type="button" aria-label="Attach context" title="Attach context">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+
+            <div class="input-field-wrapper">
+              <input 
+                type="text" 
+                class="agent-input" 
+                id="agentInput" 
+                placeholder="Message your agent..." 
+                autocomplete="off"
+              />
+              <div class="active-attachments" id="activeAttachments"></div>
+            </div>
+
+            <button class="send-btn" id="sendBtn" type="button" aria-label="Send message" title="Send (Enter)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sidebar Column (Fixed 340px) -->
+      <aside class="sidebar-column">
+        <div class="sidebar-panel">
+          <div class="sidebar-header">
+            <span class="section-label">CONTEXT & TOOLS</span>
+          </div>
+
+          <div class="tools-list">
+            <button class="tool-row" data-tool="files" type="button">
+              <div class="tool-left">
+                <span class="tool-dot"></span>
+                <span class="tool-name">File preview</span>
+              </div>
+              <span class="chevron-glyph">&gt;</span>
+            </button>
+
+            <button class="tool-row" data-tool="terminal" type="button">
+              <div class="tool-left">
+                <span class="tool-dot"></span>
+                <span class="tool-name">Terminal</span>
+              </div>
+              <span class="chevron-glyph">&gt;</span>
+            </button>
+
+            <button class="tool-row" data-tool="mcp" type="button">
+              <div class="tool-left">
+                <span class="tool-dot"></span>
+                <span class="tool-name">MCP</span>
+              </div>
+              <span class="chevron-glyph">&gt;</span>
+            </button>
+
+            <button class="tool-row" data-tool="plugins" type="button">
+              <div class="tool-left">
+                <span class="tool-dot"></span>
+                <span class="tool-name">Plugins</span>
+              </div>
+              <span class="chevron-glyph">&gt;</span>
+            </button>
+          </div>
+
+
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Interactive Slide-over / Modal Drawers -->
+  <div class="drawer-overlay" id="drawerOverlay"></div>
+
+  <!-- Tool Drawer -->
+  <aside class="tool-drawer" id="toolDrawer" aria-hidden="true">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <span class="drawer-dot"></span>
+        <h3 class="drawer-title" id="drawerTitle">Tool Details</h3>
+      </div>
+      <button class="drawer-close-btn" id="drawerCloseBtn" aria-label="Close panel">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+
+
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
