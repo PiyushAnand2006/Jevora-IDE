@@ -45,10 +45,18 @@ IDE Client (desktop / mobile)
 
 ### 2.3 Decision layer
 
-Both candidates are non-generative "System One" models: given a state
-+ typed questions, they return a typed answer with a calibrated
-confidence score, in one forward pass — no free text, so no text
-hallucination.
+The decision layer is exposed through a **model-agnostic Decision
+Engine interface** — the orchestrator depends on that interface, never
+on a specific model. Any implementation receives the current state
+plus typed questions and returns a structured, typed decision with
+confidence information, and must not generate code or user-facing
+prose. This keeps Laya, Jev, or any future decision model swappable
+without touching the LangGraph orchestration layer.
+
+Both current candidates are non-generative "System One" models: given
+a state + typed questions, they return a typed answer with a
+calibrated confidence score in one forward pass — no free text, so no
+text hallucination.
 
 | | **Jev** (TypeSafe AI) | **Laya** (Convai Innovations) |
 |---|---|---|
@@ -59,25 +67,26 @@ hallucination.
 | Out-of-the-box accuracy | Reported ~68% on TypeSafe's own benchmark | **Near-random zero-shot** (~36%, below the majority-class baseline) — headline accuracy (~77–84%) only holds *after fine-tuning* on your own task |
 | Availability | Waitlist | Public, `pip install laya`, weights on Hugging Face |
 
-**Decision for this project: Laya, with an explicit fine-tuning step
-before it's trusted unattended.** It fits the local-first,
-self-hosted direction of the rest of the system (Obsidian vault,
-local models-as-providers) and removes per-decision cost — a real
-factor once decisions run on every agent step. The catch that matters
-most: Laya's strong numbers are *post-fine-tune*, not zero-shot. Do
-not wire it into the confirm/restart/reassign loop straight from the
-base checkpoint.
+**Initial implementation: Laya as the primary Decision Engine, with
+Jev as an optional fallback implementation** — not hard-coded, just
+the first choice, because Laya fits the local-first, self-hosted
+direction of the rest of the system (Obsidian vault, local
+models-as-providers) and removes per-decision cost. The catch that
+matters most: Laya's strong numbers are *post-fine-tune*, not
+zero-shot. Do not wire it into the confirm/restart/reassign loop
+straight from the base checkpoint.
 
 Plan:
 1. Start by logging every routing/verification decision (state seen +
-   outcome) — this was already recommended for Jev and applies
-   identically to Laya; it's the fine-tuning data.
-2. Fine-tune Laya on that logged data using the project's own
-   confirm/restart/reassign/escalate schema before relying on it for
-   unattended decisions.
-3. Keep Jev (or a second LLM critic pass) as a fallback path for
-   low-confidence Laya decisions until the fine-tuned checkpoint is
-   validated.
+   outcome) — this becomes both evaluation and fine-tuning data.
+2. Evaluate Laya against the project's own confirm/restart/reassign/
+   escalate and model-routing schemas, then fine-tune where required
+   before relying on it for unattended decisions.
+3. Keep Jev, or another validated implementation, as a fallback for
+   low-confidence or high-risk Laya decisions until the local engine
+   is validated.
+4. Keep the Decision Engine interface stable so additional models can
+   be added later without modifying the agent orchestrator.
 
 **Decision schemas** (unchanged from earlier design):
 - Work verification: `Choice[confirm_done, restart_same_agent,
@@ -139,7 +148,7 @@ Plan:
 |---|---|
 | Orchestration | LangGraph |
 | Tool/retrieval glue | LangChain |
-| Decision layer | Laya (self-hosted), Jev optional fallback |
+| Decision layer | Model-agnostic Decision Engine interface (Laya primary, Jev optional fallback) |
 | Model routing | LiteLLM-style abstraction |
 | Execution sandbox | Docker / gVisor |
 | Screen-control agent | Computer Use model (Gemini 2.5 Computer Use / Claude Computer Use / OpenAI computer-use-preview) driving Playwright (web) or OS-level automation (desktop) |
