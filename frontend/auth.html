@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jevora IDE — Sign In / Sign Up</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="auth.css" />
+</head>
+<body>
+  <div class="card">
+    <input type="checkbox" id="toggle" class="toggle" />
+    <div class="card-bg"></div>
+    <div class="hero register">
+      <h2>Welcome back</h2>
+      <p>Login to review your activity and continue building.</p>
+      <label for="toggle">LOGIN</label>
+    </div>
+    <div class="form register">
+      <h2>Sign Up</h2>
+      <form id="registerForm">
+        <div class="input-group">
+          <input type="text" placeholder="Full Name" required autocomplete="name" />
+        </div>
+        <div class="input-group">
+          <input type="email" placeholder="Email Address" required autocomplete="email" />
+        </div>
+        <div class="input-group">
+          <input type="password" placeholder="Password" required autocomplete="new-password" />
+        </div>
+        <button type="submit" class="submit-btn">SIGN UP</button>
+      </form>
+    </div>
+    <div class="hero login">
+      <h2>Hello there</h2>
+      <p>Begin your journey with custom autonomous AI agents.</p>
+      <label for="toggle">SIGN UP</label>
+    </div>
+    <div class="form login">
+      <h2>Login</h2>
+      <form id="loginForm">
+        <div class="input-group">
+          <input type="email" placeholder="Email Address" required autocomplete="email" />
+        </div>
+        <div class="input-group">
+          <input type="password" placeholder="Password" required autocomplete="current-password" />
+        </div>
+        <a href="#" class="forgot-link">Forgot your password?</a>
+        <button type="submit" class="submit-btn">LOGIN</button>
+      </form>
+    </div>
+  </div>
+
+  <a href="index.html" class="back-link">&larr; Back to Jevora IDE</a>
+
+  <script>
+    document.getElementById('loginForm')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      window.location.href = 'index.html';
+    });
+    document.getElementById('registerForm')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      window.location.href = 'index.html';
+    });
+  </script>
+</body>
+</html>

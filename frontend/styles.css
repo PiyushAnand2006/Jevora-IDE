@@ -73,7 +73,11 @@ html, body {
   display: flex;
   flex-direction: column;
   background: var(--bg-app);
+  overflow: hidden;
 }
+
+/* Hide old top-bar if it remains in HTML */
+.top-bar { display: none; }
 
 /* ==========================================================================
    1. Top Bar
@@ -122,43 +126,6 @@ html, body {
   text-decoration: underline;
 }
 
-/* Mode Selector Tabs */
-.mode-tabs {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.mode-tab {
-  border: 1px solid var(--border-card);
-  background: var(--bg-surface);
-  font-family: var(--font-family);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  padding: 8px 20px;
-  border-radius: var(--radius-tab);
-  cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.mode-tab:hover:not(.active) {
-  background: var(--bg-surface-muted);
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-
-.mode-tab.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--text-inverse);
-  font-weight: 600;
-  box-shadow: 0 2px 8px rgba(124, 92, 252, 0.35);
-}
-
 .top-bar-right {
   display: flex;
   align-items: center;
@@ -199,25 +166,69 @@ html, body {
 .main-content {
   flex: 1;
   display: flex;
-  padding: 24px 32px;
-  gap: 24px;
+  padding: 0;
+  gap: 0;
   overflow: hidden;
   background: var(--bg-app);
+  height: 100vh;
 }
 
 /* ==========================================================================
-   2a. Left Sidebar Panel
+   2a. Left Sidebar Panel — ChatGPT style, full height, flush
    ========================================================================== */
 .left-sidebar {
-  width: 260px;
+  width: 258px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-surface);
-  border-radius: var(--radius-panel);
-  border: 1px solid var(--border-card);
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
   overflow: hidden;
   position: relative;
+  height: 100vh;
+}
+
+/* Sidebar top header: logo + icon buttons */
+.sidebar-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 16px 12px 20px;
+  flex-shrink: 0;
+}
+
+.sidebar-logo {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.sidebar-icon-btn:hover {
+  background: var(--bg-surface-muted);
+  color: var(--text-primary);
 }
 
 /* Left Tabs: Build | Agent */
@@ -225,11 +236,13 @@ html, body {
   display: flex;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
+  padding: 0 8px;
+  gap: 4px;
 }
 
 .left-tab {
   flex: 1;
-  padding: 12px 0;
+  padding: 10px 0;
   font-family: var(--font-family);
   font-size: 13px;
   font-weight: 500;
@@ -244,12 +257,11 @@ html, body {
 
 .left-tab:hover {
   color: var(--text-primary);
-  background: var(--bg-surface-muted);
 }
 
 .left-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  color: var(--text-primary);
+  border-bottom-color: var(--text-primary);
   font-weight: 600;
 }
 
@@ -265,6 +277,157 @@ html, body {
 
 .left-tab-content.active {
   display: flex;
+}
+
+/* Nav items (ChatGPT style) */
+.left-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 20px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  font-family: var(--font-family);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.12s ease;
+  text-align: left;
+  margin: 0;
+  position: relative;
+}
+
+.left-nav-item:hover {
+  background: var(--bg-surface-muted);
+}
+
+.left-nav-item svg {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+/* Highlighted first item (like New chat) */
+.left-nav-highlight {
+  background: var(--bg-surface-muted);
+  font-weight: 500;
+}
+
+.left-nav-highlight:hover {
+  background: var(--bg-hover);
+}
+
+.left-nav-highlight svg {
+  color: var(--accent);
+}
+
+/* Projects row with + button */
+.left-nav-projects {
+  justify-content: flex-start;
+}
+
+.left-nav-plus {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.left-nav-projects:hover .left-nav-plus {
+  opacity: 1;
+}
+
+.left-nav-plus:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+/* Recents section */
+.sidebar-recents {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 0 8px;
+  flex: 1;
+}
+
+.sidebar-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 4px 20px 8px;
+}
+
+.recent-item {
+  display: block;
+  width: 100%;
+  padding: 7px 20px;
+  background: none;
+  border: none;
+  font-family: var(--font-family);
+  font-size: 13.5px;
+  font-weight: 400;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recent-item:hover {
+  background: var(--bg-surface-muted);
+}
+
+/* Sign In button at sidebar bottom */
+.sidebar-signin-wrap {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.sidebar-signin-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-family: var(--font-family);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.sidebar-signin-btn:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.sidebar-signin-btn:active {
+  transform: translateY(0);
+  background: var(--accent-active);
+}
+
+.sidebar-signin-btn svg {
+  flex-shrink: 0;
 }
 
 /* Action Rows (New task, Search, Automations, Plugin Marketplace) */
@@ -450,17 +613,67 @@ html, body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 16px;
   min-width: 0;
   height: 100%;
+  padding: 20px 20px 20px 20px;
 }
 
-/* Agent Output Panel */
+/* Agent Output Panel (Unified central box) */
 .agent-output-panel {
   flex: 1;
   background: var(--bg-surface-alt);
   border-radius: var(--radius-panel);
   border: 1px solid var(--border-card);
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  position: relative;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.03);
+}
+
+/* Panel Header Bar (Top side with Mode Dropdown & horizontal division) */
+.panel-header-bar {
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border-card);
+}
+
+/* Panel Right Side Toggle Button */
+.panel-toggle-btn {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-tab);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.panel-toggle-btn:hover {
+  background: var(--bg-surface-muted);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.panel-toggle-btn.active {
+  color: var(--accent);
+  border-color: var(--border-focus);
+  background: var(--accent-subtle);
+}
+
+/* Panel Scrollable Area */
+.panel-scroll-area {
+  flex: 1;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -545,17 +758,170 @@ html, body {
 }
 
 /* ==========================================================================
-   3. Input Row & Floating Attach Popover
+   3. Input Row, Mode Dropdown & Floating Popovers
    ========================================================================== */
 .input-row-container {
   position: relative;
   width: 100%;
+  padding: 14px 18px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-card);
+  background: var(--bg-surface-alt);
+  border-bottom-left-radius: var(--radius-panel);
+  border-bottom-right-radius: var(--radius-panel);
 }
 
-/* Floating Attach Popover anchored above '+' button */
+/* Input Row Container */
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+/* --- Mode Dropdown (Top side of central output box) --- */
+.mode-dropdown-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.mode-dropdown-btn {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-tab);
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.mode-dropdown-btn:hover {
+  background: var(--bg-surface-muted);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.mode-dropdown-btn.open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+  background: var(--bg-surface);
+}
+
+.mode-dropdown-label {
+  color: var(--accent);
+  letter-spacing: 0.2px;
+}
+
+.mode-dropdown-chevron {
+  color: var(--text-secondary);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.mode-dropdown-btn.open .mode-dropdown-chevron {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+
+/* Mode Dropdown Menu Popup (Opens Downward from top) */
+.mode-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  bottom: auto;
+  left: 0;
+  min-width: 175px;
+  background: var(--bg-surface);
+  border-radius: 12px;
+  border: 1px solid var(--border-card);
+  box-shadow: var(--shadow-popover);
+  padding: 6px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 50;
+}
+
+.mode-dropdown-menu.open {
+  display: flex;
+  animation: popoverFade 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mode-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  font-family: var(--font-family);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.mode-dropdown-item:hover {
+  background: var(--bg-surface-muted);
+  color: var(--accent);
+}
+
+.mode-dropdown-item.active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Mode Dots */
+.mode-item-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-build {
+  background: #7C5CFC;
+  box-shadow: 0 0 6px rgba(124, 92, 252, 0.5);
+}
+
+.dot-chat {
+  background: #3B82F6;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+}
+
+.dot-general {
+  background: #10B981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.dot-analysis {
+  background: #F59E0B;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+}
+
+/* --- Attach Wrapper & Popover --- */
+.attach-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* Floating Attach Popover anchored directly above '+' button */
 .attach-menu-popover {
   position: absolute;
-  bottom: calc(100% + 12px);
+  bottom: calc(100% + 10px);
   left: 0;
   width: 168px;
   background: var(--bg-surface);
@@ -566,7 +932,7 @@ html, body {
   display: none;
   flex-direction: column;
   gap: 2px;
-  z-index: 40;
+  z-index: 50;
 }
 
 .attach-menu-popover.open {
@@ -635,14 +1001,6 @@ html, body {
   color: var(--text-disabled);
 }
 
-/* Input Row Container */
-.input-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-}
-
 /* Attach Button (48px Circle) */
 .attach-btn {
   width: 48px;
@@ -658,6 +1016,16 @@ html, body {
   box-shadow: var(--shadow-btn);
   transition: transform 0.15s ease, background-color 0.15s ease;
   flex-shrink: 0;
+}
+
+.attach-btn:hover {
+  background: var(--accent-hover);
+  transform: scale(1.04);
+}
+
+.attach-btn:active {
+  background: var(--accent-active);
+  transform: scale(0.96);
 }
 
 .attach-btn:hover {
@@ -756,18 +1124,21 @@ html, body {
 }
 
 .sidebar-column {
-  width: 340px;
+  width: 300px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  padding: 20px 20px 20px 0;
   transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, margin 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebar-column.collapsed {
   width: 0;
-  margin-right: -24px;
+  margin-right: 0;
+  padding: 0;
   opacity: 0;
   pointer-events: none;
+  overflow: hidden;
 }
 
 .sidebar-panel {

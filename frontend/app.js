@@ -7,7 +7,10 @@
 
 document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements
-  const modeTabs = document.querySelectorAll('.mode-tab');
+  const modeDropdownBtn = document.getElementById('modeDropdownBtn');
+  const modeDropdownMenu = document.getElementById('modeDropdownMenu');
+  const modeDropdownLabel = document.getElementById('modeDropdownLabel');
+  const modeDropdownItems = document.querySelectorAll('.mode-dropdown-item');
   const attachToggleBtn = document.getElementById('attachToggleBtn');
   const attachMenu = document.getElementById('attachMenu');
   const agentInput = document.getElementById('agentInput');
@@ -37,6 +40,13 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeAttachments = [];
   let isSidebarOpen = true;
 
+  const signInBtn = document.getElementById('signInBtn');
+  if (signInBtn) {
+    signInBtn.addEventListener('click', () => {
+      window.location.href = 'auth.html';
+    });
+  }
+
   // Set initial active state for toggle button
   if (sidebarToggleBtn) {
     sidebarToggleBtn.classList.add('active');
@@ -60,14 +70,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // =========================================================================
-  // 1b. Left Sidebar Tab Switching (Build | Agent)
-  // =========================================================================
   const leftTabs = document.querySelectorAll('.left-tab');
   const leftTabBuild = document.getElementById('leftTabBuild');
   const leftTabAgent = document.getElementById('leftTabAgent');
   const createAgentBtn = document.getElementById('createAgentBtn');
   const filterBtns = document.querySelectorAll('.filter-btn');
+
+  const modeDropdownWrapperEl = document.getElementById('modeDropdownWrapper');
 
   leftTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -78,9 +87,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if (target === 'build') {
         leftTabBuild.classList.add('active');
         leftTabAgent.classList.remove('active');
+        // Show mode dropdown in central panel
+        if (modeDropdownWrapperEl) modeDropdownWrapperEl.style.display = '';
       } else {
         leftTabAgent.classList.add('active');
         leftTabBuild.classList.remove('active');
+        // Hide mode dropdown in Agent creation view
+        if (modeDropdownWrapperEl) modeDropdownWrapperEl.style.display = 'none';
+        // Also close the dropdown if it was open
+        if (modeDropdownMenu) {
+          modeDropdownMenu.classList.remove('open');
+          modeDropdownBtn?.classList.remove('open');
+        }
       }
     });
   });
@@ -101,39 +119,79 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // =========================================================================
-  // 2. Mode Tabs Switching
+  // 2. Mode Dropdown Switching (Build | Chat | Research | Analysis)
   // =========================================================================
-  modeTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      modeTabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      currentMode = tab.dataset.mode;
-      showToast(`Switched to ${tab.textContent} mode`);
-
-      // Update placeholder according to mode
-      if (currentMode === 'build') {
-        agentInput.placeholder = 'Message your agent (e.g. Build a full-stack dashboard)...';
-      } else if (currentMode === 'chat') {
-        agentInput.placeholder = 'Chat with agent...';
-      } else if (currentMode === 'general') {
-        agentInput.placeholder = 'Ask any question or general instruction...';
-      } else if (currentMode === 'analysis') {
-        agentInput.placeholder = 'Provide files or repository for deep analysis...';
-      }
+  if (modeDropdownBtn && modeDropdownMenu) {
+    modeDropdownBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = modeDropdownMenu.classList.toggle('open');
+      modeDropdownBtn.classList.toggle('open', isOpen);
+      modeDropdownBtn.setAttribute('aria-expanded', String(isOpen));
+      // Close attach menu if open
+      if (attachMenu) attachMenu.classList.remove('open');
     });
-  });
+
+    modeDropdownItems.forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        modeDropdownItems.forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+
+        const selectedMode = item.dataset.mode;
+        currentMode = selectedMode;
+
+        // Capitalize mode title
+        const modeTitle = item.querySelector('.mode-item-title')?.textContent || selectedMode;
+        if (modeDropdownLabel) {
+          modeDropdownLabel.textContent = modeTitle;
+        }
+
+        // Close dropdown
+        modeDropdownMenu.classList.remove('open');
+        modeDropdownBtn.classList.remove('open');
+        modeDropdownBtn.setAttribute('aria-expanded', 'false');
+
+        showToast(`Switched to ${modeTitle} mode`);
+
+        // Update placeholder according to mode
+        if (agentInput) {
+          if (currentMode === 'build') {
+            agentInput.placeholder = 'Message your agent (e.g. Build a full-stack dashboard)...';
+          } else if (currentMode === 'chat') {
+            agentInput.placeholder = 'Chat with agent...';
+          } else if (currentMode === 'research') {
+            agentInput.placeholder = 'Search, summarize and research any topic...';
+          } else if (currentMode === 'analysis') {
+            agentInput.placeholder = 'Provide files or repository for deep analysis...';
+          }
+        }
+      });
+    });
+  }
 
   // =========================================================================
   // 3. Attach Menu Popover Toggle & Actions
   // =========================================================================
-  attachToggleBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    attachMenu.classList.toggle('open');
-  });
+  if (attachToggleBtn && attachMenu) {
+    attachToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      attachMenu.classList.toggle('open');
+      // Close mode dropdown if open
+      if (modeDropdownMenu) {
+        modeDropdownMenu.classList.remove('open');
+        modeDropdownBtn.classList.remove('open');
+      }
+    });
+  }
 
-  // Close attach menu when clicking outside
+  // Close menus when clicking outside
   document.addEventListener('click', (e) => {
-    if (!attachMenu.contains(e.target) && e.target !== attachToggleBtn) {
+    if (modeDropdownMenu && !modeDropdownMenu.contains(e.target) && e.target !== modeDropdownBtn && !modeDropdownBtn?.contains(e.target)) {
+      modeDropdownMenu.classList.remove('open');
+      modeDropdownBtn?.classList.remove('open');
+      modeDropdownBtn?.setAttribute('aria-expanded', 'false');
+    }
+    if (attachMenu && !attachMenu.contains(e.target) && e.target !== attachToggleBtn && !attachToggleBtn?.contains(e.target)) {
       attachMenu.classList.remove('open');
     }
   });
