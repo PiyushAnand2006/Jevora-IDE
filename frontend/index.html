@@ -6,7 +6,7 @@
   <title>Jevora IDE</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -136,62 +136,106 @@
             </button>
           </div>
 
-          <!-- Scrollable Content Area -->
-          <div class="panel-scroll-area">
-            <div class="empty-state" id="emptyState">
-              <p class="placeholder-text">Agent output will appear here</p>
+          <!-- Main Stage Wrapper (Smoothly animates between centered greeting & bottom docked chat) -->
+          <div class="chat-stage-wrapper" id="chatStageWrapper">
+            
+            <!-- Scrollable Messages Container (When chat starts) -->
+            <div class="panel-scroll-area" id="panelScrollArea">
+              <div class="stream-container" id="streamContainer" style="display: none;"></div>
             </div>
-            <div class="stream-container" id="streamContainer" style="display: none;"></div>
-          </div>
 
-          <!-- Input Row inside the same box -->
-          <div class="input-row-container">
-            <div class="input-row">
-              <div class="attach-wrapper" id="attachWrapper">
-                <div class="attach-menu-popover" id="attachMenu">
-                  <button class="attach-menu-item" data-action="files" type="button">
-                    <span class="menu-dot"></span>
-                    <span class="menu-label">Files</span>
-                  </button>
-                  <button class="attach-menu-item" data-action="photos" type="button">
-                    <span class="menu-dot"></span>
-                    <span class="menu-label">Photos</span>
-                  </button>
-                  <div class="attach-menu-item disabled" title="Web search is not available yet" aria-disabled="true">
-                    <span class="menu-dot disabled-dot"></span>
-                    <span class="menu-label struck">Web search</span>
-                  </div>
-                  <button class="attach-menu-item" data-action="commands" type="button">
-                    <span class="menu-prefix">/</span>
-                    <span class="menu-label">Commands</span>
-                  </button>
+            <!-- Centered Greeting Block (z.ai style) -->
+            <div class="central-chat-hero" id="centralChatHero">
+              <h1 class="greeting-heading" id="greetingHeading">What can I build for you?</h1>
+              <p class="greeting-subtitle" id="greetingSubtitle">Interact with Jevora IDE and explore the boundless creative world</p>
+            </div>
+
+            <!-- Input Container (Smoothly animates from center to bottom) -->
+            <div class="input-row-container" id="inputRowContainer">
+              <div class="input-card-box">
+                <div class="input-field-wrapper">
+                  <textarea 
+                    class="agent-input" 
+                    id="agentInput" 
+                    rows="1" 
+                    placeholder="How can I help you today?" 
+                    autocomplete="off"
+                  ></textarea>
+                  <div class="active-attachments" id="activeAttachments"></div>
                 </div>
 
-                <button class="attach-btn" id="attachToggleBtn" type="button" aria-label="Attach context" title="Attach context">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                  </svg>
+                <div class="input-bottom-row">
+                  <div class="input-bottom-left">
+                    <div class="attach-wrapper" id="attachWrapper">
+                      <div class="attach-menu-popover" id="attachMenu">
+                        <button class="attach-menu-item" data-action="files" type="button">
+                          <span class="menu-dot"></span>
+                          <span class="menu-label">Files</span>
+                        </button>
+                        <button class="attach-menu-item" data-action="photos" type="button">
+                          <span class="menu-dot"></span>
+                          <span class="menu-label">Photos</span>
+                        </button>
+                        <div class="attach-menu-item disabled" title="Web search is not available yet" aria-disabled="true">
+                          <span class="menu-dot disabled-dot"></span>
+                          <span class="menu-label struck">Web search</span>
+                        </div>
+                        <button class="attach-menu-item" data-action="commands" type="button">
+                          <span class="menu-prefix">/</span>
+                          <span class="menu-label">Commands</span>
+                        </button>
+                      </div>
+
+                      <button class="attach-icon-btn" id="attachToggleBtn" type="button" aria-label="Attach context" title="Attach context">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                          <line x1="12" y1="5" x2="12" y2="19"></line>
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                      </button>
+                    </div>
+
+                    <button class="web-search-icon-btn" id="webSearchToggleBtn" type="button" title="Search web" aria-label="Web search">
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div class="input-bottom-right">
+                    <span class="model-badge" id="currentModelBadge">Deep Think Max &rsaquo;</span>
+                    <button class="send-btn" id="sendBtn" type="button" aria-label="Send message" title="Send (Enter)">
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" y1="19" x2="12" y2="5"></line>
+                        <polyline points="5 12 12 5 19 12"></polyline>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Quick action chips row (like z.ai) -->
+              <div class="quick-chips-row" id="quickChipsRow">
+                <button class="quick-chip" data-prompt="Build a full-stack web application with responsive UI and modern backend" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="m9 8 3 3-3 3"></path><path d="m15 16-3-3 3-3"></path></svg>
+                  <span>Full-Stack</span>
+                </button>
+                <button class="quick-chip" data-prompt="Design an autonomous AI agent with custom tool bindings and verification" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><circle cx="9" cy="14" r="1.5"></circle><circle cx="15" cy="14" r="1.5"></circle></svg>
+                  <span>Agent</span>
+                </button>
+                <button class="quick-chip" data-prompt="Write clean production documentation and refactor code structure" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 2 4 4-14 14H4v-4L18 2z"></path></svg>
+                  <span>Writing</span>
+                </button>
+                <button class="quick-chip" data-prompt="Analyze system performance, data structures and pipeline bottlenecks" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="m19 9-5 5-4-4-3 3"></path></svg>
+                  <span>Data Insight</span>
                 </button>
               </div>
-
-              <div class="input-field-wrapper">
-                <input 
-                  type="text" 
-                  class="agent-input" 
-                  id="agentInput" 
-                  placeholder="Message your agent..." 
-                  autocomplete="off"
-                />
-                <div class="active-attachments" id="activeAttachments"></div>
-              </div>
-
-              <button class="send-btn" id="sendBtn" type="button" aria-label="Send message" title="Send (Enter)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="9 18 15 12 9 6"></polyline>
-                </svg>
-              </button>
             </div>
+
           </div>
         </div>
       </section>

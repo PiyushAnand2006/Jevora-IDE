@@ -15,11 +15,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const attachMenu = document.getElementById('attachMenu');
   const agentInput = document.getElementById('agentInput');
   const sendBtn = document.getElementById('sendBtn');
-  const emptyState = document.getElementById('emptyState');
   const streamContainer = document.getElementById('streamContainer');
   const agentOutputPanel = document.getElementById('agentOutputPanel');
   const activeAttachmentsContainer = document.getElementById('activeAttachments');
   const historyBtn = document.getElementById('historyBtn');
+
+  // Stage & Animated Hero Elements (z.ai style transition)
+  const chatStageWrapper = document.getElementById('chatStageWrapper');
+  const centralChatHero = document.getElementById('centralChatHero');
+  const greetingHeading = document.getElementById('greetingHeading');
+  const greetingSubtitle = document.getElementById('greetingSubtitle');
+  const panelScrollArea = document.getElementById('panelScrollArea');
+  const quickChipsRow = document.getElementById('quickChipsRow');
 
   // Sidebar Toggle & Column
   const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
@@ -87,34 +94,52 @@ document.addEventListener('DOMContentLoaded', () => {
       if (target === 'build') {
         leftTabBuild.classList.add('active');
         leftTabAgent.classList.remove('active');
-        // Show mode dropdown in central panel
         if (modeDropdownWrapperEl) modeDropdownWrapperEl.style.display = '';
+        if (greetingHeading) greetingHeading.textContent = 'What can I build for you?';
+        if (greetingSubtitle) greetingSubtitle.textContent = 'Interact with Jevora IDE and explore the boundless creative world';
+        if (agentInput) agentInput.placeholder = 'How can I help you today?';
       } else {
         leftTabAgent.classList.add('active');
         leftTabBuild.classList.remove('active');
-        // Hide mode dropdown in Agent creation view
         if (modeDropdownWrapperEl) modeDropdownWrapperEl.style.display = 'none';
-        // Also close the dropdown if it was open
         if (modeDropdownMenu) {
           modeDropdownMenu.classList.remove('open');
           modeDropdownBtn?.classList.remove('open');
         }
+        if (greetingHeading) greetingHeading.textContent = 'Create anything you can imagine';
+        if (greetingSubtitle) greetingSubtitle.textContent = 'Design custom autonomous agents with specialized tools and unique workflows';
+        if (agentInput) agentInput.placeholder = 'Describe the agent you want to create...';
       }
     });
   });
 
-  // Filter toggle (Group / Project)
-  filterBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      filterBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+  // "New task" nav button resets stage back to centered greeting
+  const newTaskNavBtn = document.querySelector('.left-nav-highlight');
+  if (newTaskNavBtn) {
+    newTaskNavBtn.addEventListener('click', () => {
+      if (chatStageWrapper) {
+        chatStageWrapper.classList.remove('chat-active');
+      }
+      if (streamContainer) {
+        streamContainer.innerHTML = '';
+        streamContainer.style.display = 'none';
+      }
+      if (agentInput) {
+        agentInput.value = '';
+        agentInput.style.height = 'auto';
+        agentInput.focus();
+      }
+      showToast('Started new task');
     });
-  });
+  }
 
   // Create Agent FAB
   if (createAgentBtn) {
     createAgentBtn.addEventListener('click', () => {
-      showToast('Agent creation flow — coming soon');
+      // Switch to Agent tab
+      const agentTabBtn = document.querySelector('.left-tab[data-left-tab="agent"]');
+      if (agentTabBtn) agentTabBtn.click();
+      if (agentInput) agentInput.focus();
     });
   }
 
@@ -272,9 +297,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const text = agentInput.value.trim();
     if (!text && activeAttachments.length === 0) return;
 
-    // Hide empty state and show stream container
-    emptyState.style.display = 'none';
-    streamContainer.style.display = 'flex';
+    // Trigger smooth transition from center down to bottom dock!
+    if (chatStageWrapper) {
+      chatStageWrapper.classList.add('chat-active');
+    }
+    if (streamContainer) {
+      streamContainer.style.display = 'flex';
+    }
 
     // User Message
     const userMessage = document.createElement('div');
@@ -293,11 +322,14 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
     streamContainer.appendChild(userMessage);
 
-    // Clear input & attachments
+    // Clear input & attachments & reset textarea height
     agentInput.value = '';
+    agentInput.style.height = 'auto';
     activeAttachments = [];
     renderAttachments();
-    agentOutputPanel.scrollTop = agentOutputPanel.scrollHeight;
+    if (panelScrollArea) {
+      panelScrollArea.scrollTop = panelScrollArea.scrollHeight;
+    }
 
     // Simulate Agent Thinking & Response
     simulateAgentResponse(text);
@@ -309,6 +341,24 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       handleSendMessage();
     }
+  });
+
+  // Auto-resize textarea as user types
+  agentInput.addEventListener('input', () => {
+    agentInput.style.height = 'auto';
+    agentInput.style.height = Math.min(agentInput.scrollHeight, 150) + 'px';
+  });
+
+  // Quick Chips Click Handlers (z.ai style prompts)
+  const quickChips = document.querySelectorAll('.quick-chip');
+  quickChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      const prompt = chip.dataset.prompt;
+      if (prompt && agentInput) {
+        agentInput.value = prompt;
+        handleSendMessage();
+      }
+    });
   });
 
   function simulateAgentResponse(prompt) {
