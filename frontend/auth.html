@@ -19,17 +19,46 @@
       <!-- Top Header Navigation Bar -->
       <header class="auth-header">
         <a href="index.html" class="auth-logo-link">
-          <svg class="jevora-star-logo" width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z" fill="url(#starGradient)"/>
+          <!-- Jevora Logo: J + network nodes -->
+          <svg class="jevora-j-logo" width="34" height="34" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
-              <linearGradient id="starGradient" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+              <linearGradient id="jLetterGrad" x1="6" y1="4" x2="22" y2="44" gradientUnits="userSpaceOnUse">
                 <stop stop-color="#38BDF8"/>
-                <stop offset="1" stop-color="#2563EB"/>
+                <stop offset="0.55" stop-color="#3B82F6"/>
+                <stop offset="1" stop-color="#6366F1"/>
+              </linearGradient>
+              <linearGradient id="nodeGrad" x1="28" y1="6" x2="46" y2="36" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#38BDF8"/>
+                <stop offset="1" stop-color="#7C3AED"/>
               </linearGradient>
             </defs>
+
+            <!-- Bold J letterform -->
+            <!-- Top horizontal bar of J -->
+            <rect x="8" y="4" width="16" height="5" rx="2" fill="url(#jLetterGrad)"/>
+            <!-- Vertical stroke of J -->
+            <rect x="16" y="4" width="8" height="28" rx="2" fill="url(#jLetterGrad)"/>
+            <!-- Bottom curve/hook of J going left -->
+            <path d="M24 30 Q24 40 16 40 Q8 40 8 33 L8 29 Q8 26 11 26 L13 26 Q13 28 13 33 Q13 35 16 35 Q19 35 19 30 Z" fill="url(#jLetterGrad)"/>
+
+            <!-- Network node cluster (top-right of J) -->
+            <!-- Lines first (behind nodes) -->
+            <line x1="34" y1="10" x2="30" y2="18" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="34" y1="10" x2="43" y2="16" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="30" y1="18" x2="36" y2="26" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"/>
+
+            <!-- Hub node (center) -->
+            <circle cx="30" cy="18" r="4" fill="#38BDF8"/>
+            <!-- Top node -->
+            <circle cx="34" cy="8" r="3.2" fill="#38BDF8"/>
+            <!-- Right node -->
+            <circle cx="43" cy="16" r="2.8" fill="#7C3AED"/>
+            <!-- Bottom node -->
+            <circle cx="36" cy="26" r="2.8" fill="#6366F1"/>
           </svg>
           <span class="auth-logo-text">Jevora IDE</span>
         </a>
+
 
         <nav class="auth-nav">
           <a href="#features" class="nav-item">Features</a>
@@ -118,17 +147,31 @@
 
             <!-- Card Brand Header -->
             <div class="card-brand-header">
-              <svg class="card-star-logo" width="26" height="26" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z" fill="url(#cardStarGradient)"/>
+              <!-- Jevora Logo: J + network nodes (card size) -->
+              <svg class="card-j-logo" width="26" height="26" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <defs>
-                  <linearGradient id="cardStarGradient" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                  <linearGradient id="cardJGrad" x1="6" y1="4" x2="22" y2="44" gradientUnits="userSpaceOnUse">
                     <stop stop-color="#38BDF8"/>
-                    <stop offset="1" stop-color="#2563EB"/>
+                    <stop offset="0.55" stop-color="#3B82F6"/>
+                    <stop offset="1" stop-color="#6366F1"/>
                   </linearGradient>
                 </defs>
+                <!-- Bold J letterform -->
+                <rect x="8" y="4" width="16" height="5" rx="2" fill="url(#cardJGrad)"/>
+                <rect x="16" y="4" width="8" height="28" rx="2" fill="url(#cardJGrad)"/>
+                <path d="M24 30 Q24 40 16 40 Q8 40 8 33 L8 29 Q8 26 11 26 L13 26 Q13 28 13 33 Q13 35 16 35 Q19 35 19 30 Z" fill="url(#cardJGrad)"/>
+                <!-- Network node cluster -->
+                <line x1="34" y1="10" x2="30" y2="18" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"/>
+                <line x1="34" y1="10" x2="43" y2="16" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"/>
+                <line x1="30" y1="18" x2="36" y2="26" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="30" cy="18" r="4" fill="#38BDF8"/>
+                <circle cx="34" cy="8" r="3.2" fill="#38BDF8"/>
+                <circle cx="43" cy="16" r="2.8" fill="#7C3AED"/>
+                <circle cx="36" cy="26" r="2.8" fill="#6366F1"/>
               </svg>
               <span class="card-brand-title">Jevora IDE</span>
             </div>
+
 
             <!-- Title & Subtitle -->
             <div class="card-titles">

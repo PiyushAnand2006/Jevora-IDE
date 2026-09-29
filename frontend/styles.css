@@ -1200,21 +1200,32 @@ html, body {
   background: var(--accent-subtle);
 }
 
-/* Model Badge (like Deep Think Max) */
+/* Model Badge — clickable button to open model selector */
 .model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 11px;
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-pill);
   font-size: 12.5px;
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: all 0.15s ease;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
   user-select: none;
 }
-
 .model-badge:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
   color: var(--text-primary);
-  background: var(--bg-surface-muted);
+}
+.model-badge.popover-open {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* Send Button (Dark Pill/Rounded Button with Arrow) */
@@ -1707,4 +1718,429 @@ html, body {
   font-weight: 500;
   box-shadow: 0 10px 25px rgba(0,0,0,0.15);
   animation: popoverFade 0.2s ease;
+}
+
+/* ==========================================================================
+   MODEL / PROVIDER SELECTOR CHAIN
+   ========================================================================== */
+
+
+/* Backdrop (shared across all 3 panels) */
+.model-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: none;
+}
+.model-popover-backdrop.active {
+  display: block;
+}
+
+/* Base popover panel — fixed so it escapes any overflow/stacking context */
+.model-popover {
+  position: fixed;
+  z-index: 9999;
+  width: 310px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-card);
+  border-radius: 14px;
+  box-shadow: var(--shadow-popover);
+  opacity: 0;
+  transform: translateY(6px) scale(0.97);
+  pointer-events: none;
+  transition: opacity 0.2s cubic-bezier(0.16,1,0.3,1),
+              transform 0.2s cubic-bezier(0.16,1,0.3,1);
+  transform-origin: bottom right;
+}
+.model-popover.open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: all;
+}
+
+/* Provider panel (panel 2 & 3) */
+.model-popover.provider-panel {
+  transform: translateX(12px) scale(0.97);
+  transform-origin: bottom right;
+}
+.model-popover.provider-panel.open {
+  transform: translateX(0) scale(1);
+}
+
+.model-pop-inner {
+  padding: 10px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-pop-section-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+  padding: 4px 10px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.model-pop-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 6px 10px;
+}
+
+/* ---- Model list items ---- */
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.model-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+  position: relative;
+}
+.model-list-item:hover {
+  background: var(--bg-hover);
+}
+.model-list-item.active {
+  background: var(--accent-subtle);
+}
+
+/* Radio dot */
+.model-item-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  flex-shrink: 0;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+}
+.model-list-item.active .model-item-radio {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--bg-surface);
+}
+
+.model-item-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+}
+.model-item-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* ---- Saved providers ---- */
+.saved-providers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 30px;
+}
+
+.no-providers-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  font-style: italic;
+}
+
+.saved-provider-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  gap: 8px;
+  transition: background 0.12s;
+}
+.saved-provider-item:hover { background: var(--bg-hover); }
+.saved-provider-item .sp-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+}
+.saved-provider-item .sp-url {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.saved-provider-item .sp-delete {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.saved-provider-item:hover .sp-delete { opacity: 1; }
+.saved-provider-item .sp-delete:hover { background: #FEE2E2; color: #EF4444; }
+
+/* ---- Add Provider button ---- */
+.add-provider-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 10px;
+  background: transparent;
+  border: 1.5px dashed var(--border-card);
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.add-provider-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+/* ---- Provider available list ---- */
+.provider-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  margin-bottom: 4px;
+}
+
+.provider-back-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+.provider-back-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.provider-available-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.provider-available-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+}
+.provider-available-item:hover {
+  background: var(--bg-hover);
+}
+
+/* Provider logo bubbles */
+.provider-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  letter-spacing: -0.5px;
+}
+.openai-logo {
+  background: #000;
+  color: #fff;
+  font-size: 10px;
+  letter-spacing: 0px;
+}
+.google-logo {
+  background: linear-gradient(135deg, #4285F4 0%, #34A853 50%, #FBBC04 75%, #EA4335 100%);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+}
+.anthropic-logo {
+  background: #CC9B7A;
+  color: #fff;
+  font-size: 16px;
+}
+.custom-logo {
+  background: var(--bg-surface-alt);
+  border: 1.5px solid var(--border-card);
+  color: var(--text-secondary);
+}
+
+.provider-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.provider-item-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.provider-item-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* ---- Custom provider form ---- */
+.custom-form-panel {
+  width: 330px;
+}
+
+.custom-provider-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 4px 2px;
+}
+
+.provider-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.3px;
+}
+
+.provider-form-input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--bg-surface-alt);
+  border: 1.5px solid var(--border-card);
+  border-radius: 9px;
+  font-size: 13.5px;
+  font-family: var(--font-family);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.provider-form-input:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.provider-form-input::placeholder {
+  color: var(--text-muted);
+}
+
+.provider-input-with-icon {
+  position: relative;
+}
+.provider-input-with-icon .provider-form-input {
+  padding-right: 38px;
+}
+.provider-key-toggle {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  transition: color 0.12s;
+}
+.provider-key-toggle:hover { color: var(--text-primary); }
+
+.provider-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.provider-cancel-btn {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1.5px solid var(--border-card);
+  border-radius: var(--radius-btn);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.provider-cancel-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.provider-save-btn {
+  padding: 8px 16px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-btn);
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.provider-save-btn:hover {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-btn);
+}
+
+/* Predefined provider quick-add (panel 2 → close back to panel 1 after saving) */
+.provider-available-item.selected {
+  background: var(--accent-subtle);
+}
+
+/* Position anchor: the input-bottom-right must be relative for popover anchoring */
+.input-bottom-right {
+  position: relative;
 }

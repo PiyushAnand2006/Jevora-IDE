@@ -204,7 +204,7 @@
                   </div>
 
                   <div class="input-bottom-right">
-                    <span class="model-badge" id="currentModelBadge">Deep Think Max &rsaquo;</span>
+                    <button class="model-badge" id="currentModelBadge" type="button" aria-haspopup="true" aria-expanded="false" title="Select model & provider">Auto &rsaquo;</button>
                     <button class="send-btn" id="sendBtn" type="button" aria-label="Send message" title="Send (Enter)">
                       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="12" y1="19" x2="12" y2="5"></line>
@@ -237,6 +237,144 @@
             </div>
 
           </div>
+
+          <!-- ===== MODEL SELECTOR CHAIN (Popover system) ===== -->
+
+          <!-- PANEL 1: Model + Saved Providers -->
+          <div class="model-popover" id="modelPopover" role="dialog" aria-label="Select model" aria-hidden="true">
+            <div class="model-pop-inner">
+
+              <div class="model-pop-section-label">MODEL</div>
+              <div class="model-list" id="modelList">
+                <button class="model-list-item active" data-model="auto" type="button">
+                  <span class="model-item-radio"></span>
+                  <span class="model-item-name">Auto</span>
+                  <span class="model-item-sub">Best model for task</span>
+                </button>
+                <button class="model-list-item" data-model="gpt-4o" type="button">
+                  <span class="model-item-radio"></span>
+                  <span class="model-item-name">GPT-4o</span>
+                  <span class="model-item-sub">OpenAI · Fast &amp; capable</span>
+                </button>
+                <button class="model-list-item" data-model="claude-3-7-sonnet" type="button">
+                  <span class="model-item-radio"></span>
+                  <span class="model-item-name">Claude 3.7 Sonnet</span>
+                  <span class="model-item-sub">Anthropic · Thinking mode</span>
+                </button>
+                <button class="model-list-item" data-model="gemini-2-5-pro" type="button">
+                  <span class="model-item-radio"></span>
+                  <span class="model-item-name">Gemini 2.5 Pro</span>
+                  <span class="model-item-sub">Google · 1M context window</span>
+                </button>
+                <button class="model-list-item" data-model="local" type="button">
+                  <span class="model-item-radio"></span>
+                  <span class="model-item-name">Local Model</span>
+                  <span class="model-item-sub">Ollama · Run on device</span>
+                </button>
+              </div>
+
+              <div class="model-pop-divider"></div>
+
+              <div class="model-pop-section-label">SAVED PROVIDERS</div>
+              <div class="saved-providers-list" id="savedProvidersList">
+                <div class="no-providers-hint" id="noProvidersHint">No providers saved yet</div>
+              </div>
+              <button class="add-provider-btn" id="addProviderBtn" type="button">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add Provider
+              </button>
+
+            </div>
+          </div>
+
+          <!-- PANEL 2: Providers Available -->
+          <div class="model-popover provider-panel" id="providerListPanel" role="dialog" aria-label="Select provider" aria-hidden="true">
+            <div class="model-pop-inner">
+              <div class="provider-panel-header">
+                <button class="provider-back-btn" id="providerBackBtn" type="button" aria-label="Back">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <span class="model-pop-section-label" style="margin:0;">PROVIDERS AVAILABLE</span>
+              </div>
+
+              <div class="provider-available-list">
+                <button class="provider-available-item" data-provider="openai" type="button">
+                  <span class="provider-logo openai-logo">GPT</span>
+                  <div class="provider-item-text">
+                    <span class="provider-item-name">OpenAI</span>
+                    <span class="provider-item-sub">GPT-4o, o1, o3-mini &amp; more</span>
+                  </div>
+                </button>
+                <button class="provider-available-item" data-provider="google" type="button">
+                  <span class="provider-logo google-logo">G</span>
+                  <div class="provider-item-text">
+                    <span class="provider-item-name">Google</span>
+                    <span class="provider-item-sub">Gemini 2.5 Pro, Flash &amp; more</span>
+                  </div>
+                </button>
+                <button class="provider-available-item" data-provider="anthropic" type="button">
+                  <span class="provider-logo anthropic-logo">&#9670;</span>
+                  <div class="provider-item-text">
+                    <span class="provider-item-name">Anthropic</span>
+                    <span class="provider-item-sub">Claude 3.5, 3.7 Sonnet &amp; more</span>
+                  </div>
+                </button>
+              </div>
+
+              <div class="model-pop-divider"></div>
+              <button class="provider-available-item custom-provider-btn" id="customProviderBtn" type="button">
+                <span class="provider-logo custom-logo">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+                </span>
+                <div class="provider-item-text">
+                  <span class="provider-item-name">Custom Provider</span>
+                  <span class="provider-item-sub">OpenAI-compatible API endpoint</span>
+                </div>
+              </button>
+
+            </div>
+          </div>
+
+          <!-- PANEL 3: Custom Provider Form -->
+          <div class="model-popover provider-panel custom-form-panel" id="customProviderPanel" role="dialog" aria-label="Add custom provider" aria-hidden="true">
+            <div class="model-pop-inner">
+              <div class="provider-panel-header">
+                <button class="provider-back-btn" id="customProviderBackBtn" type="button" aria-label="Back to providers">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <span class="model-pop-section-label" style="margin:0;">CUSTOM PROVIDER</span>
+              </div>
+
+              <form class="custom-provider-form" id="customProviderForm" autocomplete="off">
+                <div class="provider-form-group">
+                  <label class="provider-form-label" for="providerNameInput">Provider Name</label>
+                  <input class="provider-form-input" id="providerNameInput" type="text" placeholder="e.g. My Ollama Server" autocomplete="off" />
+                </div>
+                <div class="provider-form-group">
+                  <label class="provider-form-label" for="providerBaseUrlInput">Base URL</label>
+                  <input class="provider-form-input" id="providerBaseUrlInput" type="url" placeholder="https://api.example.com/v1" autocomplete="off" />
+                </div>
+                <div class="provider-form-group">
+                  <label class="provider-form-label" for="providerApiKeyInput">API Key</label>
+                  <div class="provider-input-with-icon">
+                    <input class="provider-form-input" id="providerApiKeyInput" type="password" placeholder="sk-..." autocomplete="new-password" />
+                    <button class="provider-key-toggle" id="providerKeyToggle" type="button" aria-label="Toggle key visibility">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                  </div>
+                </div>
+                <div class="provider-form-actions">
+                  <button class="provider-cancel-btn" id="providerCancelBtn" type="button">Cancel</button>
+                  <button class="provider-save-btn" id="providerSaveBtn" type="submit">Save Provider</button>
+                </div>
+              </form>
+
+            </div>
+          </div>
+
+          <!-- Popover Backdrop -->
+          <div class="model-popover-backdrop" id="modelPopoverBackdrop"></div>
+
         </div>
       </section>
 

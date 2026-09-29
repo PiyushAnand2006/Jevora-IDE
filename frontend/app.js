@@ -581,4 +581,261 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     return String(string).replace(/[&<>"']/g, (m) => map[m]);
   }
+
+  // =========================================================================
+  // 6. MODEL / PROVIDER SELECTION CHAIN
+  // =========================================================================
+  const modelBadge = document.getElementById('currentModelBadge');
+  const modelPopover = document.getElementById('modelPopover');
+  const providerListPanel = document.getElementById('providerListPanel');
+  const customProviderPanel = document.getElementById('customProviderPanel');
+  const modelPopoverBackdrop = document.getElementById('modelPopoverBackdrop');
+  const addProviderBtn = document.getElementById('addProviderBtn');
+  const providerBackBtn = document.getElementById('providerBackBtn');
+  const customProviderBtn = document.getElementById('customProviderBtn');
+  const customProviderBackBtn = document.getElementById('customProviderBackBtn');
+  const customProviderForm = document.getElementById('customProviderForm');
+  const providerCancelBtn = document.getElementById('providerCancelBtn');
+  const providerKeyToggle = document.getElementById('providerKeyToggle');
+  const providerApiKeyInput = document.getElementById('providerApiKeyInput');
+  const savedProvidersList = document.getElementById('savedProvidersList');
+  const noProvidersHint = document.getElementById('noProvidersHint');
+
+  // Saved providers state (persisted in localStorage)
+  let savedProviders = JSON.parse(localStorage.getItem('jevora_providers') || '[]');
+  let selectedModel = { key: 'auto', label: 'Auto' };
+
+  const PANEL_NONE = 0, PANEL_MODEL = 1, PANEL_PROVIDERS = 2, PANEL_CUSTOM = 3;
+  let activePanel = PANEL_NONE;
+
+  function positionPopovers() {
+    if (!modelBadge) return;
+    const rect = modelBadge.getBoundingClientRect();
+    const GAP = 10;
+    // Place above the badge, aligned to its right edge
+    const top = rect.top - GAP;
+    const right = window.innerWidth - rect.right;
+    [modelPopover, providerListPanel, customProviderPanel].forEach(el => {
+      if (el) {
+        el.style.bottom = (window.innerHeight - rect.top + GAP) + 'px';
+        el.style.right = right + 'px';
+        el.style.top = 'auto';
+      }
+    });
+  }
+
+  function openPanel(panel) {
+    // Close all first
+    modelPopover?.classList.remove('open');
+    providerListPanel?.classList.remove('open');
+    customProviderPanel?.classList.remove('open');
+    modelBadge?.classList.remove('popover-open');
+
+    activePanel = panel;
+    if (panel === PANEL_NONE) {
+      modelPopoverBackdrop?.classList.remove('active');
+      return;
+    }
+
+    positionPopovers();
+    modelPopoverBackdrop?.classList.add('active');
+    if (panel === PANEL_MODEL) {
+      modelPopover?.classList.add('open');
+      modelBadge?.classList.add('popover-open');
+    } else if (panel === PANEL_PROVIDERS) {
+      providerListPanel?.classList.add('open');
+    } else if (panel === PANEL_CUSTOM) {
+      customProviderPanel?.classList.add('open');
+    }
+  }
+
+  function closeAllPanels() { openPanel(PANEL_NONE); }
+
+  // Toggle Panel 1 on badge click
+  if (modelBadge) {
+    modelBadge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (activePanel === PANEL_MODEL) {
+        closeAllPanels();
+      } else {
+        renderSavedProviders();
+        openPanel(PANEL_MODEL);
+      }
+    });
+  }
+
+  // Backdrop click → close all
+  if (modelPopoverBackdrop) {
+    modelPopoverBackdrop.addEventListener('click', closeAllPanels);
+  }
+
+  // Stop propagation inside all popovers
+  [modelPopover, providerListPanel, customProviderPanel].forEach(el => {
+    el?.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+  // ---- Model list selection ----
+  const modelItems = document.querySelectorAll('.model-list-item');
+  modelItems.forEach(item => {
+    item.addEventListener('click', () => {
+      modelItems.forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      const modelKey = item.dataset.model;
+      const modelName = item.querySelector('.model-item-name')?.textContent || modelKey;
+      selectedModel = { key: modelKey, label: modelName };
+      if (modelBadge) modelBadge.textContent = modelName + ' ›';
+      showToast(`Model set to ${modelName}`);
+      closeAllPanels();
+    });
+  });
+
+  // ---- Add Provider → Panel 2 ----
+  if (addProviderBtn) {
+    addProviderBtn.addEventListener('click', () => {
+      openPanel(PANEL_PROVIDERS);
+    });
+  }
+
+  // ---- Back from Panel 2 → Panel 1 ----
+  if (providerBackBtn) {
+    providerBackBtn.addEventListener('click', () => {
+      openPanel(PANEL_MODEL);
+    });
+  }
+
+  // ---- Predefined providers (Panel 2) ----
+  const providerAvailableItems = document.querySelectorAll('.provider-available-item[data-provider]');
+  const PROVIDER_DEFAULTS = {
+    openai: { name: 'OpenAI', url: 'https://api.openai.com/v1' },
+    google: { name: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta' },
+    anthropic: { name: 'Anthropic Claude', url: 'https://api.anthropic.com/v1' }
+  };
+
+  providerAvailableItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const providerKey = item.dataset.provider;
+      const defaults = PROVIDER_DEFAULTS[providerKey];
+      if (defaults) {
+        // Prompt for API key quickly
+        const apiKey = prompt(`Enter your API key for ${defaults.name}:`, '');
+        if (apiKey === null) return; // Cancelled
+        saveProvider({ name: defaults.name, url: defaults.url, apiKey: apiKey || '' });
+        showToast(`${defaults.name} saved!`);
+        renderSavedProviders();
+        openPanel(PANEL_MODEL);
+      }
+    });
+  });
+
+  // ---- Custom Provider → Panel 3 ----
+  if (customProviderBtn) {
+    customProviderBtn.addEventListener('click', () => {
+      openPanel(PANEL_CUSTOM);
+    });
+  }
+
+  // ---- Back from Panel 3 → Panel 2 ----
+  if (customProviderBackBtn) {
+    customProviderBackBtn.addEventListener('click', () => {
+      openPanel(PANEL_PROVIDERS);
+    });
+  }
+
+  // ---- Cancel in Panel 3 → Panel 2 ----
+  if (providerCancelBtn) {
+    providerCancelBtn.addEventListener('click', () => {
+      openPanel(PANEL_PROVIDERS);
+    });
+  }
+
+  // ---- API Key visibility toggle ----
+  if (providerKeyToggle && providerApiKeyInput) {
+    providerKeyToggle.addEventListener('click', () => {
+      const isHidden = providerApiKeyInput.type === 'password';
+      providerApiKeyInput.type = isHidden ? 'text' : 'password';
+      providerKeyToggle.innerHTML = isHidden
+        ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`
+        : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    });
+  }
+
+  // ---- Custom provider form submit ----
+  if (customProviderForm) {
+    customProviderForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = document.getElementById('providerNameInput')?.value.trim();
+      const url = document.getElementById('providerBaseUrlInput')?.value.trim();
+      const apiKey = providerApiKeyInput?.value.trim();
+
+      if (!name) { showToast('Provider name is required'); return; }
+      if (!url) { showToast('Base URL is required'); return; }
+
+      saveProvider({ name, url, apiKey: apiKey || '' });
+      showToast(`Provider "${name}" saved!`);
+
+      // Reset form
+      customProviderForm.reset();
+      if (providerApiKeyInput) providerApiKeyInput.type = 'password';
+
+      renderSavedProviders();
+      openPanel(PANEL_MODEL);
+    });
+  }
+
+  function saveProvider(provider) {
+    const existing = savedProviders.findIndex(p => p.name === provider.name);
+    if (existing !== -1) {
+      savedProviders[existing] = provider;
+    } else {
+      savedProviders.push(provider);
+    }
+    localStorage.setItem('jevora_providers', JSON.stringify(savedProviders));
+  }
+
+  function removeProvider(index) {
+    savedProviders.splice(index, 1);
+    localStorage.setItem('jevora_providers', JSON.stringify(savedProviders));
+    renderSavedProviders();
+  }
+
+  function renderSavedProviders() {
+    if (!savedProvidersList) return;
+    savedProvidersList.innerHTML = '';
+
+    if (savedProviders.length === 0) {
+      savedProvidersList.innerHTML = '<div class="no-providers-hint">No providers saved yet</div>';
+      return;
+    }
+
+    savedProviders.forEach((provider, index) => {
+      const item = document.createElement('button');
+      item.className = 'saved-provider-item';
+      item.type = 'button';
+      item.innerHTML = `
+        <span class="sp-name">${escapeHtml(provider.name)}</span>
+        <span class="sp-url">${escapeHtml(provider.url.replace(/^https?:\/\//, '').substring(0, 28))}${provider.url.length > 35 ? '…' : ''}</span>
+        <span class="sp-delete" title="Remove provider">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </span>
+      `;
+
+      // Select provider
+      item.addEventListener('click', (e) => {
+        if (e.target.closest('.sp-delete')) {
+          e.stopPropagation();
+          removeProvider(index);
+          return;
+        }
+        if (modelBadge) modelBadge.textContent = provider.name + ' ›';
+        showToast(`Provider set to ${provider.name}`);
+        closeAllPanels();
+      });
+
+      savedProvidersList.appendChild(item);
+    });
+  }
+
+  // Initial render
+  renderSavedProviders();
+
 });

@@ -87,13 +87,15 @@ body {
   user-select: none;
 }
 
-.jevora-star-logo {
-  filter: drop-shadow(0 2px 8px rgba(37, 99, 235, 0.4));
-  transition: transform 0.2s ease;
+.jevora-j-logo {
+  filter: drop-shadow(0 2px 10px rgba(56, 189, 248, 0.35));
+  transition: transform 0.2s ease, filter 0.2s ease;
+  flex-shrink: 0;
 }
 
-.auth-logo-link:hover .jevora-star-logo {
-  transform: rotate(15deg) scale(1.08);
+.auth-logo-link:hover .jevora-j-logo {
+  transform: scale(1.06);
+  filter: drop-shadow(0 3px 14px rgba(56, 189, 248, 0.55));
 }
 
 .auth-logo-text {
@@ -293,8 +295,9 @@ body {
   gap: 10px;
 }
 
-.card-star-logo {
-  filter: drop-shadow(0 2px 8px rgba(37, 99, 235, 0.4));
+.card-j-logo {
+  filter: drop-shadow(0 2px 8px rgba(56, 189, 248, 0.35));
+  flex-shrink: 0;
 }
 
 .card-brand-title {
