@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2">
 </head>
 <body>
   <div class="app-container">
@@ -279,6 +279,10 @@
               <div class="saved-providers-list" id="savedProvidersList">
                 <div class="no-providers-hint" id="noProvidersHint">No providers saved yet</div>
               </div>
+              <div class="provider-models-section" id="providerModelsSection" hidden>
+                <div class="model-pop-section-label">MODELS FROM SELECTED PROVIDER</div>
+                <div class="provider-models-list" id="providerModelsList"></div>
+              </div>
               <button class="add-provider-btn" id="addProviderBtn" type="button">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 Add Provider
@@ -432,6 +436,6 @@
 
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>

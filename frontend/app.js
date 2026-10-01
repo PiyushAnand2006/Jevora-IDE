@@ -291,8 +291,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // =========================================================================
-  // 4. Chat & Agent Output Simulation (with JEV verification feedback)
+  // 4. Chat & Agent Output (local FastAPI orchestrator)
   // =========================================================================
+  function scrollMessagesToBottom() {
+    if (!panelScrollArea) return;
+    requestAnimationFrame(() => {
+      panelScrollArea.scrollTop = panelScrollArea.scrollHeight;
+    });
+  }
+
   function handleSendMessage() {
     const text = agentInput.value.trim();
     if (!text && activeAttachments.length === 0) return;
@@ -327,12 +334,9 @@ document.addEventListener('DOMContentLoaded', () => {
     agentInput.style.height = 'auto';
     activeAttachments = [];
     renderAttachments();
-    if (panelScrollArea) {
-      panelScrollArea.scrollTop = panelScrollArea.scrollHeight;
-    }
+    scrollMessagesToBottom();
 
-    // Simulate Agent Thinking & Response
-    simulateAgentResponse(text);
+    runAgentTask(text || 'Review attached workspace context');
   }
 
   sendBtn.addEventListener('click', handleSendMessage);
@@ -361,7 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  function simulateAgentResponse(prompt) {
+  async function runAgentTask(prompt) {
     const agentMessage = document.createElement('div');
     agentMessage.className = 'message-bubble agent';
     agentMessage.innerHTML = `
@@ -371,25 +375,45 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
       <div class="bubble-content">
         <div class="typing-indicator" style="color:var(--text-secondary);">
-          <span style="display:inline-block;animation:pulse 1s infinite;">●</span> Routing to agent pool and executing with JEV decision verifier...
+          <span style="display:inline-block;animation:pulse 1s infinite;">●</span> Routing to the local agent pool…
         </div>
       </div>
     `;
     streamContainer.appendChild(agentMessage);
-    agentOutputPanel.scrollTop = agentOutputPanel.scrollHeight;
+    scrollMessagesToBottom();
 
-    setTimeout(() => {
+    try {
+      const response = await fetch('/api/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: prompt, mode: currentMode === 'general' ? 'research' : currentMode })
+      });
+      if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+      const createdRun = await response.json();
+      const result = await waitForRun(createdRun.id);
       const contentEl = agentMessage.querySelector('.bubble-content');
+      const decision = result.decisions?.at(-1);
       contentEl.innerHTML = `
-        <p>I have processed the task requirement: <strong>${escapeHtml(prompt || 'workspace context')}</strong>.</p>
-        <p style="margin-top:8px;font-size:13px;color:var(--text-secondary);">JEV Verifier: Grounded on system tool output (zero-hallucination verified).</p>
-        <pre><code>✓ Planner Node: Decomposed task into sub-agent work units
-✓ Coder Node: Generated verified source code
-✓ JEV Critic Node: Verified tool output against test assertions</code></pre>
-        <p style="margin-top:8px;">Ready for next instruction.</p>
+        <p>${escapeHtml(result.final_output || 'The run completed without an output.')}</p>
+        <p style="margin-top:8px;font-size:13px;color:var(--text-secondary);">Decision engine: ${escapeHtml(decision?.choice || 'pending')} (${Math.round((decision?.confidence || 0) * 100)}% confidence) · ${escapeHtml(result.status)}</p>
       `;
-      agentOutputPanel.scrollTop = agentOutputPanel.scrollHeight;
-    }, 1000);
+      scrollMessagesToBottom();
+    } catch (error) {
+      const contentEl = agentMessage.querySelector('.bubble-content');
+      contentEl.innerHTML = `<p>Unable to reach the local backend. Start it with <code>python -m uvicorn backend.main:app --reload</code>.</p><p style="font-size:12px;color:var(--text-secondary);">${escapeHtml(error.message)}</p>`;
+      scrollMessagesToBottom();
+    }
+  }
+
+  async function waitForRun(runId) {
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const response = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+      if (!response.ok) throw new Error('Run could not be retrieved');
+      const run = await response.json();
+      if (['done', 'failed', 'escalated'].includes(run.status)) return run;
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
+    throw new Error('Run timed out while waiting for the orchestrator');
   }
 
   // =========================================================================
@@ -600,8 +624,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const providerApiKeyInput = document.getElementById('providerApiKeyInput');
   const savedProvidersList = document.getElementById('savedProvidersList');
   const noProvidersHint = document.getElementById('noProvidersHint');
+  const providerModelsSection = document.getElementById('providerModelsSection');
+  const providerModelsList = document.getElementById('providerModelsList');
 
-  // Saved providers state (persisted in localStorage)
+  // Saved providers are mirrored locally for offline UI continuity and sent to
+  // the local backend so the agent router can actually use them.
   let savedProviders = JSON.parse(localStorage.getItem('jevora_providers') || '[]');
   let selectedModel = { key: 'auto', label: 'Auto' };
 
@@ -712,14 +739,14 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   providerAvailableItems.forEach(item => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', async () => {
       const providerKey = item.dataset.provider;
       const defaults = PROVIDER_DEFAULTS[providerKey];
       if (defaults) {
         // Prompt for API key quickly
         const apiKey = prompt(`Enter your API key for ${defaults.name}:`, '');
         if (apiKey === null) return; // Cancelled
-        saveProvider({ name: defaults.name, url: defaults.url, apiKey: apiKey || '' });
+        await saveProvider({ name: defaults.name, url: defaults.url, apiKey: apiKey || '' });
         showToast(`${defaults.name} saved!`);
         renderSavedProviders();
         openPanel(PANEL_MODEL);
@@ -761,7 +788,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---- Custom provider form submit ----
   if (customProviderForm) {
-    customProviderForm.addEventListener('submit', (e) => {
+    customProviderForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = document.getElementById('providerNameInput')?.value.trim();
       const url = document.getElementById('providerBaseUrlInput')?.value.trim();
@@ -770,7 +797,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!name) { showToast('Provider name is required'); return; }
       if (!url) { showToast('Base URL is required'); return; }
 
-      saveProvider({ name, url, apiKey: apiKey || '' });
+      await saveProvider({ name, url, apiKey: apiKey || '' });
       showToast(`Provider "${name}" saved!`);
 
       // Reset form
@@ -782,19 +809,48 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function saveProvider(provider) {
+  async function saveProvider(provider) {
     const existing = savedProviders.findIndex(p => p.name === provider.name);
+    const previous = existing !== -1 ? savedProviders[existing] : null;
+    const localProvider = {
+      ...previous,
+      ...provider,
+      apiKey: provider.apiKey || previous?.apiKey || ''
+    };
     if (existing !== -1) {
-      savedProviders[existing] = provider;
+      savedProviders[existing] = localProvider;
     } else {
-      savedProviders.push(provider);
+      savedProviders.push(localProvider);
     }
     localStorage.setItem('jevora_providers', JSON.stringify(savedProviders));
+    try {
+      const endpoint = localProvider.id ? `/api/providers/${encodeURIComponent(localProvider.id)}` : '/api/providers';
+      const response = await fetch(endpoint, {
+      method: localProvider.id ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: localProvider.name,
+        base_url: localProvider.url,
+        api_key: localProvider.apiKey,
+        kind: 'custom'
+      })
+      });
+      if (!response.ok) throw new Error('Provider could not be saved locally');
+      const stored = await response.json();
+      const local = savedProviders.find(item => item.name === localProvider.name);
+      if (local) local.id = stored.id;
+      localStorage.setItem('jevora_providers', JSON.stringify(savedProviders));
+      return local;
+    } catch (_) {
+      showToast('Provider saved in this browser; start the backend to use it for agent runs.');
+      return localProvider;
+    }
   }
 
   function removeProvider(index) {
-    savedProviders.splice(index, 1);
+    const [removed] = savedProviders.splice(index, 1);
     localStorage.setItem('jevora_providers', JSON.stringify(savedProviders));
+    if (removed?.id) fetch(`/api/providers/${encodeURIComponent(removed.id)}`, { method: 'DELETE' }).catch(() => {});
     renderSavedProviders();
   }
 
@@ -820,22 +876,81 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
 
       // Select provider
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', async (e) => {
         if (e.target.closest('.sp-delete')) {
           e.stopPropagation();
           removeProvider(index);
           return;
         }
-        if (modelBadge) modelBadge.textContent = provider.name + ' ›';
-        showToast(`Provider set to ${provider.name}`);
-        closeAllPanels();
+        if (modelBadge) modelBadge.textContent = `${provider.name} · loading… ›`;
+        openPanel(PANEL_MODEL);
+        await loadProviderModels(provider);
       });
 
       savedProvidersList.appendChild(item);
     });
   }
 
-  // Initial render
+  async function loadProviderModels(provider) {
+    if (!providerModelsSection || !providerModelsList) return;
+    providerModelsSection.hidden = false;
+    providerModelsList.innerHTML = '<div class="provider-model-status">Loading models…</div>';
+    if (!provider.id) {
+      providerModelsList.innerHTML = '<div class="provider-model-status">Save this provider to fetch its models.</div>';
+      return;
+    }
+    try {
+      const response = await fetch(`/api/providers/${encodeURIComponent(provider.id)}/models`);
+      if (!response.ok) throw new Error('Model list unavailable');
+      const { models } = await response.json();
+      if (!models.length) {
+        providerModelsList.innerHTML = '<div class="provider-model-status">No models returned. Check the provider URL and API key.</div>';
+        return;
+      }
+      providerModelsList.innerHTML = '';
+      models.forEach(model => {
+        const item = document.createElement('button');
+        item.className = 'provider-model-item';
+        item.type = 'button';
+        item.textContent = model;
+        item.addEventListener('click', () => {
+          selectedModel = { key: model, label: model };
+          if (modelBadge) modelBadge.textContent = `${provider.name} · ${model} ›`;
+          showToast(`Model set to ${model}`);
+          closeAllPanels();
+        });
+        providerModelsList.appendChild(item);
+      });
+      if (modelBadge) modelBadge.textContent = `${provider.name} ›`;
+      showToast(`${models.length} model${models.length === 1 ? '' : 's'} loaded from ${provider.name}`);
+    } catch (_) {
+      providerModelsList.innerHTML = '<div class="provider-model-status">Could not fetch models. Check the provider URL and API key.</div>';
+      if (modelBadge) modelBadge.textContent = `${provider.name} ›`;
+    }
+  }
+
+  async function syncSavedProviders() {
+    try {
+      const response = await fetch('/api/providers');
+      if (!response.ok) return;
+      const providers = await response.json();
+      if (providers.length) {
+        savedProviders = providers.map(provider => ({
+          id: provider.id,
+          name: provider.name,
+          url: provider.base_url,
+          apiKey: ''
+        }));
+        localStorage.setItem('jevora_providers', JSON.stringify(savedProviders));
+        renderSavedProviders();
+      }
+    } catch (_) {
+      // Opening the HTML file directly remains a useful design preview.
+    }
+  }
+
+  // Initial render and a best-effort refresh from the local backend.
   renderSavedProviders();
+  syncSavedProviders();
 
 });

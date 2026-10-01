@@ -5,3 +5,14 @@ design.md
 *.gif
 *.webp
 *.ico
+
+.freebuff
+
+# Local runtime state — may contain provider credentials and private run history.
+backend/data/providers.json
+backend/server.log
+backend/server.err.log
+vault/
+__pycache__/
+*.py[cod]
+.coverage
