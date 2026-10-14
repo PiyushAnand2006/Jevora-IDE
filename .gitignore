@@ -8,11 +8,20 @@ design.md
 
 .freebuff
 
-# Local runtime state — may contain provider credentials and private run history.
-backend/data/providers.json
-backend/server.log
-backend/server.err.log
+# Local runtime state — may contain encrypted credentials, keys and private run history.
+.jevora-data/
+workspace/
 vault/
+.env
+*.db
+*.db-wal
+*.db-shm
 __pycache__/
 *.py[cod]
 .coverage
+
+# Tooling
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/

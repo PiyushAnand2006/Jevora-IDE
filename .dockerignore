@@ -1,0 +1,11 @@
+.venv
+.git
+.jevora-data
+workspace
+vault
+tests
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
+*.avif

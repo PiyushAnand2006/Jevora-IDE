@@ -1,0 +1,8 @@
+{
+  "id": "hello_plugin",
+  "name": "Hello Plugin",
+  "description": "Test plugin that registers a tool and a run hook.",
+  "version": "0.1.0",
+  "module": "plugin.py",
+  "default_enabled": true
+}

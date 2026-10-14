@@ -1,0 +1,39 @@
+# docker compose up --build
+#
+# Sandboxes are *sibling* containers started through the mounted Docker socket, so the workspace must be
+# mounted at the same absolute path inside this container as on the host. Set JEVORA_WORKSPACE to an
+# absolute host path (defaults to ./workspace resolved by compose).
+services:
+  jevora:
+    build: .
+    image: jevora-ide:latest
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      WORKSPACE_ROOT: ${JEVORA_WORKSPACE:-${PWD}/workspace}
+      VAULT_PATH: /data/vault
+      SANDBOX_MODE: docker
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+      WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-false}
+      SCREEN_ALLOWED_DOMAINS: '["localhost","127.0.0.1","host.docker.internal"]'
+    volumes:
+      - jevora-data:/data
+      - ${JEVORA_WORKSPACE:-${PWD}/workspace}:${JEVORA_WORKSPACE:-${PWD}/workspace}
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Optional local model server: `docker compose --profile ollama up`
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+
+volumes:
+  jevora-data:
+  ollama-models:
