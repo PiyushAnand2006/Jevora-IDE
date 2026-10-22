@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <div class="app-container">
@@ -42,7 +42,7 @@
 
           <button class="left-nav-item" id="historyBtn" type="button">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 15"/></svg>
-            <span>History</span>
+            <span>Conversations</span>
           </button>
 
           <button class="left-nav-item" type="button">
@@ -67,8 +67,10 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
           </button>
-
-
+          <section class="recent-conversations" aria-label="Recent conversations">
+            <div class="conversation-section-label">RECENT CONVERSATIONS</div>
+            <div id="recentConversations" aria-live="polite"></div>
+          </section>
         </div>
 
         <!-- AGENT TAB CONTENT -->
@@ -172,6 +174,10 @@
 
             <!-- Input Container (Smoothly animates from center to bottom) -->
             <div class="input-row-container" id="inputRowContainer">
+              <div class="conversation-context" id="conversationContext" hidden>
+                <div class="conversation-context-copy"><strong id="conversationTitle"></strong><span id="conversationHint">Your conversation is ready to continue.</span></div>
+                <button class="continue-conversation-btn" id="continueConversationBtn" type="button">Continue conversation <span aria-hidden="true">↗</span></button>
+              </div>
               <div class="input-card-box">
                 <div class="input-field-wrapper">
                   <textarea 

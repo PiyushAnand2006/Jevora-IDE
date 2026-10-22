@@ -14,6 +14,8 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from backend.agents.prompts import DEFAULT_ACTING_BRAIN_SYSTEM_PROMPT
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -37,6 +39,7 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:8000", "http://127.0.0.1:8000"]
     )
     public_base_url: str = "http://127.0.0.1:8000"
+    acting_brain_system_prompt: str = Field(default=DEFAULT_ACTING_BRAIN_SYSTEM_PROMPT, max_length=20_000)
 
     # ---- auth ----------------------------------------------------------------
     auth_required: bool = False
@@ -82,6 +85,7 @@ class Settings(BaseSettings):
     max_concurrent_runs: int = 4
     max_agent_steps: int = 24
     run_token_budget: int = 600_000
+    context_window_tokens: int = Field(default=262_144, ge=1)
     run_time_budget_s: int = 1800
     run_cost_budget_usd: float = 5.0
     max_prompt_chars: int = 100_000

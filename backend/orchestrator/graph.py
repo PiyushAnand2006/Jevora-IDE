@@ -26,6 +26,7 @@ from langgraph.types import Command
 from backend.agents.pool import RunBudget
 from backend.agents.runtime import RunContext
 from backend.agents.workspace_state import WorkspaceSnapshot, load_snapshot, save_snapshot
+from backend.conversations import owned_conversation
 from backend.core.logging import get_logger
 from backend.db.models import Run, Workspace
 from backend.orchestrator.executor import RunHandle
@@ -237,6 +238,8 @@ class Orchestrator:
     async def run(self, handle: RunHandle) -> None:
         async with self.app.sessions() as session:
             run = await session.get(Run, handle.run_id)
+            if run is not None and run.conversation_id is not None:
+                await owned_conversation(session, run.user_id, run.conversation_id, run.mode)
         if run is None:
             return
         config: dict[str, Any] = {"configurable": {"thread_id": run.id}, "recursion_limit": 500}

@@ -177,6 +177,58 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentUser = null;
   let currentDrawer = null;
   let drawerCleanup = null;
+  let sessionRevision = 0;
+  let conversationLoading = false;
+  let runStarting = false;
+  let activeConversationTitle = '';
+  const activeRunViews = new Set();
+
+  // localStorage already scopes by origin; additionally isolate accounts and workspaces.
+  function conversationStorageKey() {
+    return `jevora_active_conversation:${currentUser?.id || 'local'}:${window.location.pathname}`;
+  }
+
+  function setConversationId(id) {
+    conversationId = id || null;
+    try {
+      if (conversationId) localStorage.setItem(conversationStorageKey(), conversationId);
+      else localStorage.removeItem(conversationStorageKey());
+    } catch (_) { /* Private browsing can disable persistence. */ }
+  }
+
+  function updateConversationComposer() {
+    const busy = conversationLoading || runStarting || [...activeRunViews].some((view) => !view.finished);
+    sendBtn.disabled = busy;
+    agentInput.disabled = conversationLoading;
+    agentInput.placeholder = conversationLoading ? 'Loading conversation…' : busy ? 'The agent is working…' : conversationId ? 'Continue this conversation…' : 'How can I help you today?';
+    const context = $('conversationContext');
+    if (context) context.hidden = !conversationId;
+    if ($('conversationTitle')) $('conversationTitle').textContent = activeConversationTitle || 'Conversation';
+    if ($('conversationHint')) $('conversationHint').textContent = busy ? 'An agent is working on this conversation.' : 'Your conversation is ready to continue.';
+    if ($('continueConversationBtn')) $('continueConversationBtn').disabled = busy;
+    document.querySelectorAll('[data-conversation-id]').forEach((row) => {
+      const selected = row.dataset.conversationId === conversationId;
+      row.classList.toggle('selected', selected);
+      row.setAttribute('aria-current', selected ? 'true' : 'false');
+    });
+  }
+
+  $('continueConversationBtn')?.addEventListener('click', () => { agentInput.focus(); });
+
+  function beginConversationSession(clearStored = true) {
+    sessionRevision += 1;
+    activeRunViews.forEach((view) => view.dispose());
+    activeRunViews.clear();
+    runStarting = false;
+    conversationLoading = false;
+    conversationId = null;
+    activeConversationTitle = '';
+    if (clearStored) setConversationId(null);
+    activeAttachments = [];
+    renderAttachments();
+    updateConversationComposer();
+    return sessionRevision;
+  }
 
   // =========================================================================
   // 2. Auth: profile, sign in / out
@@ -286,10 +338,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function resetConversation(message) {
+    beginConversationSession();
     chatStageWrapper?.classList.remove('chat-active');
     if (streamContainer) { streamContainer.innerHTML = ''; streamContainer.style.display = 'none'; }
     if (agentInput) { agentInput.value = ''; agentInput.style.height = 'auto'; agentInput.focus(); }
-    conversationId = null;
+    closeDrawer();
     if (message) showToast(message);
   }
 
@@ -314,7 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modeDropdownItems.forEach((i) => i.classList.remove('active'));
         item.classList.add('active');
         const selectedMode = item.dataset.mode;
-        if (selectedMode !== currentMode) conversationId = null;
+        if (selectedMode !== currentMode) resetConversation();
         currentMode = selectedMode;
         const modeTitle = item.querySelector('.mode-item-title')?.textContent || selectedMode;
         if (modeDropdownLabel) modeDropdownLabel.textContent = modeTitle;
@@ -465,10 +518,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function handleSendMessage() {
+    if (conversationLoading || runStarting || [...activeRunViews].some((view) => !view.finished)) return;
     const text = agentInput.value.trim();
     if (activeAttachments.some((a) => a.uploading)) { showToast('Wait for uploads to finish'); return; }
     if (!text && activeAttachments.length === 0) return;
     const attachments = activeAttachments.slice();
+    streamContainer.querySelectorAll('.conversation-empty').forEach((state) => state.remove());
     appendUserBubble(text, attachments);
     agentInput.value = '';
     agentInput.style.height = 'auto';
@@ -499,6 +554,9 @@ document.addEventListener('DOMContentLoaded', () => {
   class RunView {
     constructor(runId, label) {
       this.runId = runId;
+      this.sessionRevision = sessionRevision;
+      this.disposed = false;
+      activeRunViews.add(this);
       this.nodes = new Map();
       this.lastSeq = 0;
       this.finished = false;
@@ -531,6 +589,13 @@ document.addEventListener('DOMContentLoaded', () => {
       this.cancelBtn = this.el.querySelector('.run-cancel-btn');
       this.cancelBtn.addEventListener('click', () => this.cancel());
       this.treeBox.style.display = 'none';
+    }
+
+    isCurrent() { return !this.disposed && this.sessionRevision === sessionRevision; }
+
+    dispose() {
+      this.disposed = true;
+      this.stopStreaming?.();
     }
 
     setStatus(status) {
@@ -566,6 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     handle(event) {
+      if (!this.isCurrent()) return null;
       if (event.seq) this.lastSeq = Math.max(this.lastSeq, event.seq);
       const data = event.data || {};
       switch (event.type) {
@@ -647,7 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
               { choice: btn.dataset.choice, message, escalation_id: escalation.id });
             this.escalationSlot.innerHTML = '';
             showToast(`Answer sent: ${btn.dataset.choice}`);
-            if (this.finished) { this.finished = false; this.finalEl.innerHTML = ''; this.decisionEl.textContent = ''; streamRun(this); }
+            if (this.finished && this.isCurrent()) { this.finished = false; this.finalEl.innerHTML = ''; this.decisionEl.textContent = ''; updateConversationComposer(); streamRun(this); }
           } catch (error) {
             showToast(`Could not send answer: ${error.message}`);
             this.escalationSlot.querySelectorAll('button').forEach((b) => { b.disabled = false; });
@@ -665,6 +731,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     finalize(run) {
+      if (!this.isCurrent()) return;
       this.finished = true;
       this.setStatus(run.status);
       this.streamEl.textContent = '';
@@ -676,10 +743,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (run.status === 'escalated' && run.escalation) this.showEscalation(run.escalation);
       if (!this.nodes.size) this.treeBox.style.display = 'none';
       if (this.nodes.size > 4) this.treeBox.open = false;
-      if (run.conversation_id && run.mode === 'chat') conversationId = run.conversation_id;
+      updateConversationComposer();
       scrollMessagesToBottom();
       refreshStatus();
-      if (currentDrawer === 'history') renderHistoryDrawer();
+      refreshConversationLists();
     }
   }
 
@@ -693,49 +760,91 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function streamRun(view) {
+    view.stopStreaming?.();
     let retries = 0;
     let closedByUs = false;
-    const finish = async () => {
+    let stopped = false;
+    let polling = false;
+    let finishing = false;
+    let socket;
+    let connectionTimer;
+    let retryTimer;
+    const isCurrent = () => !stopped && view.isCurrent();
+    view.stopStreaming = () => {
+      stopped = true;
       closedByUs = true;
-      try { view.finalize(await api.get(`/api/runs/${encodeURIComponent(view.runId)}`)); }
-      catch (error) { view.finalEl.textContent = `Could not load the run: ${error.message}`; }
+      clearTimeout(connectionTimer);
+      clearTimeout(retryTimer);
+      socket?.close();
+    };
+    const finish = async () => {
+      if (!isCurrent() || finishing) return;
+      finishing = true;
+      closedByUs = true;
+      socket?.close();
+      try {
+        const run = await api.get(`/api/runs/${encodeURIComponent(view.runId)}`);
+        if (isCurrent()) view.finalize(run);
+      } catch (error) {
+        if (isCurrent()) { finishing = false; fallback(); }
+      }
     };
     const fallback = async () => {
-      if (view.finished) return;
+      if (!isCurrent() || view.finished || polling) return;
+      polling = true;
       try {
         let run = await api.get(`/api/runs/${encodeURIComponent(view.runId)}`);
-        while (!TERMINAL.includes(run.status)) {
+        while (isCurrent() && !TERMINAL.includes(run.status)) {
           view.setStatus(run.status);
           if (run.status === 'awaiting_user' && run.escalation) view.showEscalation(run.escalation);
           await new Promise((resolve) => setTimeout(resolve, 600));
+          if (!isCurrent()) return;
           run = await api.get(`/api/runs/${encodeURIComponent(view.runId)}`);
         }
-        view.finalize(run);
-      } catch (error) { view.finalEl.textContent = `Unable to reach the backend: ${error.message}`; }
+        if (isCurrent()) view.finalize(run);
+      } catch (error) {
+        if (isCurrent()) {
+          view.finalEl.textContent = `Connection interrupted: ${error.message}`;
+          const retry = document.createElement('button');
+          retry.className = 'chip-btn';
+          retry.type = 'button';
+          retry.textContent = 'Reconnect to run';
+          retry.addEventListener('click', () => { retry.remove(); streamRun(view); });
+          view.finalEl.appendChild(retry);
+        }
+      } finally { polling = false; }
     };
     const open = () => {
+      if (!isCurrent()) return;
       let ws;
       try { ws = new WebSocket(wsUrl(`/api/runs/${encodeURIComponent(view.runId)}/stream`, { last_seq: view.lastSeq || '' })); }
       catch (_) { fallback(); return; }
-      const timer = setTimeout(() => { if (ws.readyState !== WebSocket.OPEN) { closedByUs = true; ws.close(); fallback(); } }, 4000);
-      ws.onopen = () => clearTimeout(timer);
+      socket = ws;
+      connectionTimer = setTimeout(() => { if (isCurrent() && ws.readyState !== WebSocket.OPEN) { closedByUs = true; ws.close(); fallback(); } }, 4000);
+      ws.onopen = () => clearTimeout(connectionTimer);
       ws.onmessage = (message) => {
+        if (!isCurrent()) return;
         let event;
         try { event = JSON.parse(message.data); } catch (_) { return; }
-        if (view.handle(event) === 'terminal') { ws.close(); finish(); }
+        if (view.handle(event) === 'terminal') finish();
       };
       ws.onerror = () => {};
       ws.onclose = () => {
-        clearTimeout(timer);
-        if (closedByUs || view.finished) return;
+        clearTimeout(connectionTimer);
+        if (!isCurrent() || closedByUs || view.finished) return;
         retries += 1;
-        if (retries <= 3) setTimeout(open, 800 * retries); else fallback();
+        if (retries <= 3) retryTimer = setTimeout(open, 800 * retries); else fallback();
       };
     };
     open();
   }
 
   async function runAgentTask(prompt, attachmentIds) {
+    // A first message is navigation too: a slow boot restore must not replace it.
+    if (!conversationId) { sessionRevision += 1; setConversationId(null); }
+    const revision = sessionRevision;
+    runStarting = true;
+    updateConversationComposer();
     const label = selectedAgent ? `${selectedAgent.name} · custom agent` : `IDE Agent (${currentMode.toUpperCase()}) · LangGraph Orchestrator`;
     const placeholder = document.createElement('div');
     placeholder.className = 'message-bubble agent';
@@ -747,15 +856,23 @@ document.addEventListener('DOMContentLoaded', () => {
       const body = { text: prompt, mode: currentMode === 'general' ? 'research' : currentMode, model: selectedModel.key,
         attachments: attachmentIds };
       if (selectedAgent) body.agent_id = selectedAgent.id;
-      if (conversationId && currentMode === 'chat') body.conversation_id = conversationId;
+      if (conversationId) body.conversation_id = conversationId;
       const created = await api.post('/api/runs', body);
+      if (revision !== sessionRevision) return;
+      if (created.conversation_id) setConversationId(created.conversation_id);
+      if (!activeConversationTitle) activeConversationTitle = prompt.slice(0, 100);
       const view = new RunView(created.id, label);
       placeholder.replaceWith(view.el);
       view.setStatus(created.status);
-      streamRun(view);
+      if (TERMINAL.includes(created.status)) view.finalize(created);
+      else streamRun(view);
+      refreshConversationLists();
     } catch (error) {
+      if (revision !== sessionRevision) return;
       placeholder.querySelector('.bubble-content').innerHTML = `<p>${escapeHtml(error.status === 422 || error.status === 413 ? error.message : 'Unable to reach the local backend. Start it with')} ${error.status ? '' : '<code>python -m uvicorn backend.main:app --reload</code>.'}</p><p style="font-size:12px;color:var(--text-secondary);">${escapeHtml(error.message)}</p>`;
       scrollMessagesToBottom();
+    } finally {
+      if (revision === sessionRevision) { runStarting = false; updateConversationComposer(); }
     }
   }
 
@@ -1096,79 +1213,199 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---- History --------------------------------------------------------------
   let historyCursor = null;
-  async function renderHistoryDrawer(focusSearch = false, append = false) {
-    if (!append) {
-      openDrawer('Agent Session History', 'history');
-      drawerBody.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">
-        <div style="display:flex;gap:8px"><input class="drawer-input" id="historyQuery" placeholder="Search runs…">
-        <select class="drawer-select" id="historyMode" style="width:130px"><option value="">All modes</option><option value="build">Build</option><option value="chat">Chat</option><option value="research">Research</option><option value="analysis">Analysis</option></select></div>
-        <div id="historyList" style="display:flex;flex-direction:column;gap:10px"></div>
-        <button class="chip-btn" type="button" id="historyMore" style="display:none">Load more</button></div>`;
-      let debounce;
-      $('historyQuery').addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(() => loadHistory(false), 250); });
-      $('historyMode').addEventListener('change', () => loadHistory(false));
-      $('historyMore').addEventListener('click', () => loadHistory(true));
-      if (focusSearch) $('historyQuery').focus();
+  let historyItems = [];
+  let historyRequest = 0;
+  let recentRequest = 0;
+  let conversationRefreshTimer;
+
+  function conversationGroup(iso) {
+    const date = new Date(iso);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+    const week = new Date(today); week.setDate(week.getDate() - 7);
+    const month = new Date(today); month.setDate(month.getDate() - 30);
+    if (date >= today) return 'Today';
+    if (date >= yesterday) return 'Yesterday';
+    if (date >= week) return 'Previous 7 days';
+    if (date >= month) return 'Previous 30 days';
+    return Number.isNaN(date.getTime()) ? 'Older' : date.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  }
+
+  function renderConversationRows(container, items, compact = false) {
+    container.innerHTML = '';
+    if (!items.length) {
+      container.innerHTML = `<div class="conversation-empty"><strong>${compact ? 'A fresh start' : 'No conversations found'}</strong><span>${compact ? 'Your conversations will appear here.' : 'Start a new task, or try a different search or mode.'}</span></div>`;
+      return;
     }
-    await loadHistory(append);
+    let group = null;
+    const sorted = [...items].sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+    sorted.forEach((conversation) => {
+      const nextGroup = conversationGroup(conversation.updated_at || conversation.created_at);
+      if (group !== nextGroup) {
+        group = nextGroup;
+        const heading = document.createElement('div');
+        heading.className = 'conversation-group-label';
+        heading.textContent = group;
+        container.appendChild(heading);
+      }
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `conversation-row${conversation.id === conversationId ? ' selected' : ''}${compact ? ' compact' : ''}`;
+      row.dataset.conversationId = conversation.id;
+      row.setAttribute('aria-current', conversation.id === conversationId ? 'true' : 'false');
+      row.title = conversation.title || 'Untitled conversation';
+      const active = Array.isArray(conversation.active_runs) ? conversation.active_runs.length : Number(conversation.active_runs) || 0;
+      const count = Number(conversation.message_count) || 0;
+      const preview = typeof conversation.last_message === 'string' ? conversation.last_message : conversation.last_message?.content || '';
+      row.innerHTML = `<div class="conversation-row-top"><strong>${escapeHtml(conversation.title || 'Untitled conversation')}</strong>${active ? '<span class="conversation-live">Active</span>' : ''}</div>
+        ${!compact && preview ? `<div class="conversation-preview">${escapeHtml(preview.slice(0, 180))}</div>` : ''}
+        <div class="conversation-meta"><span>${escapeHtml(conversation.mode || 'chat')}</span><span>${count} message${count === 1 ? '' : 's'}</span>${!compact ? `<span>${escapeHtml(formatTime(conversation.updated_at || conversation.created_at))}</span>` : ''}</div>`;
+      row.addEventListener('click', () => openConversation(conversation.id));
+      container.appendChild(row);
+    });
+  }
+
+  async function loadRecentConversations() {
+    const container = $('recentConversations');
+    if (!container) return;
+    const request = ++recentRequest;
+    if (!container.children.length) container.innerHTML = '<div class="conversation-loading" role="status">Loading conversations…</div>';
+    try {
+      const page = await api.get('/api/conversations?limit=50');
+      if (request !== recentRequest) return;
+      const sorted = [...page.items].sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+      renderConversationRows(container, sorted.slice(0, 12), true);
+    } catch (_) {
+      if (request !== recentRequest) return;
+      container.innerHTML = '<div class="conversation-empty"><span>Conversations are unavailable.</span><button class="chip-btn" type="button">Try again</button></div>';
+      container.querySelector('button').addEventListener('click', loadRecentConversations);
+    }
+  }
+
+  function refreshConversationLists() {
+    clearTimeout(conversationRefreshTimer);
+    conversationRefreshTimer = setTimeout(() => {
+      loadRecentConversations();
+      if (currentDrawer === 'history') loadHistory(false);
+    }, 200);
+  }
+
+  async function renderHistoryDrawer(focusSearch = false) {
+    openDrawer('Conversations', 'history');
+    historyCursor = null;
+    historyItems = [];
+    drawerBody.innerHTML = `<div class="conversation-history">
+      <div class="conversation-history-intro">Pick up where you left off.</div>
+      <div class="conversation-filters"><input class="drawer-input" id="historyQuery" placeholder="Search conversations…" aria-label="Search conversations" type="search">
+      <select class="drawer-select" id="historyMode" aria-label="Filter conversations by mode"><option value="">All modes</option><option value="build">Build</option><option value="chat">Chat</option><option value="research">Research</option><option value="analysis">Analysis</option></select></div>
+      <div id="historyList" aria-live="polite"></div>
+      <button class="chip-btn" type="button" id="historyMore" hidden>Load more conversations</button></div>`;
+    let debounce;
+    $('historyQuery').addEventListener('input', () => {
+      ++historyRequest; // Invalidate the previous query immediately, before debounce.
+      clearTimeout(debounce);
+      $('historyMore').hidden = true;
+      debounce = setTimeout(() => loadHistory(false), 250);
+    });
+    $('historyMode').addEventListener('change', () => { clearTimeout(debounce); loadHistory(false); });
+    $('historyMore').addEventListener('click', () => loadHistory(true));
+    drawerCleanup = () => { clearTimeout(debounce); ++historyRequest; };
+    if (focusSearch) $('historyQuery').focus();
+    await loadHistory(false);
   }
 
   async function loadHistory(append) {
     const list = $('historyList');
-    if (!list) return;
-    const params = new URLSearchParams({ limit: '20' });
+    if (!list || currentDrawer !== 'history') return;
+    const request = ++historyRequest;
+    const more = $('historyMore');
+    more.disabled = true;
+    if (!append) {
+      historyCursor = null;
+      historyItems = [];
+      more.hidden = true;
+      list.innerHTML = '<div class="conversation-loading" role="status">Loading conversations…</div>';
+    }
+    const params = new URLSearchParams({ limit: '50' });
     if ($('historyQuery')?.value) params.set('q', $('historyQuery').value);
     if ($('historyMode')?.value) params.set('mode', $('historyMode').value);
     if (append && historyCursor) params.set('cursor', historyCursor);
-    let page;
-    try { page = await api.get(`/api/runs?${params}`); } catch (error) { list.innerHTML = `<div class="drawer-card">${escapeHtml(error.message)}</div>`; return; }
-    historyCursor = page.next_cursor;
-    if (!append) list.innerHTML = '';
-    if (!page.items.length && !append) list.innerHTML = '<div class="drawer-muted">No runs yet. Your agent sessions will appear here.</div>';
-    page.items.forEach((run) => {
-      const card = document.createElement('div');
-      card.className = 'drawer-card clickable';
-      const verdict = run.verdict ? ` · ${escapeHtml(run.verdict.choice)} (${Math.round(run.verdict.confidence * 100)}%, ${escapeHtml(run.verdict.engine)})` : '';
-      card.innerHTML = `<div style="font-size:11px;color:var(--text-secondary);">${escapeHtml(formatTime(run.created_at))}</div>
-        <strong style="display:block;margin-top:2px;">${escapeHtml(run.title || run.task)}</strong>
-        <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Mode: ${escapeHtml(run.mode)} · ${escapeHtml(run.status)}${verdict}</div>`;
-      card.addEventListener('click', () => showRunDetails(run.id));
-      list.appendChild(card);
-    });
-    const more = $('historyMore');
-    if (more) more.style.display = historyCursor ? '' : 'none';
+    try {
+      const page = await api.get(`/api/conversations?${params}`);
+      if (request !== historyRequest || currentDrawer !== 'history') return;
+      historyCursor = page.next_cursor;
+      historyItems = [...new Map([...historyItems, ...page.items].map((item) => [item.id, item])).values()];
+      renderConversationRows(list, historyItems);
+      more.hidden = !historyCursor;
+    } catch (error) {
+      if (request !== historyRequest || currentDrawer !== 'history') return;
+      if (!append) {
+        list.innerHTML = `<div class="conversation-empty"><strong>Could not load conversations</strong><span>${escapeHtml(error.message)}</span><button class="chip-btn" type="button">Try again</button></div>`;
+        list.querySelector('button').addEventListener('click', () => loadHistory(false));
+      } else showToast(`Could not load more conversations: ${error.message}`);
+    } finally { if (request === historyRequest) more.disabled = false; }
   }
 
-  function treeHtml(nodes) {
-    return nodes.map((n) => `<div class="tree-node"><div class="tn-line"><span class="tn-role">${escapeHtml(n.role)}</span>
-      <span class="tn-model">${escapeHtml(n.model_used || '')}</span><span class="tn-status ${escapeHtml(n.status)}">${escapeHtml(n.status)}</span>
-      ${n.duration_ms != null ? `<span class="drawer-muted">${(n.duration_ms / 1000).toFixed(1)}s · ${n.tokens} tok</span>` : ''}
-      ${(n.decisions || []).filter((d) => d.acted).map((d) => `<span class="tn-decision">⟶ ${escapeHtml(d.choice)} (${Math.round(d.confidence * 100)}%)</span>`).join('')}</div>
-      ${n.children?.length ? `<div class="tn-children">${treeHtml(n.children)}</div>` : ''}</div>`).join('');
+  async function openConversation(id, { restoring = false } = {}) {
+    const revision = beginConversationSession(false);
+    selectedAgent = null;
+    document.querySelector('.left-tab[data-left-tab="build"]')?.click();
+    renderAttachments();
+    closeDrawer();
+    ensureChatStage();
+    agentInput.value = '';
+    agentInput.style.height = 'auto';
+    streamContainer.innerHTML = '<div class="conversation-loading" role="status">Opening conversation…</div>';
+    conversationLoading = true;
+    updateConversationComposer();
+    try {
+      const conversation = await api.get(`/api/conversations/${encodeURIComponent(id)}`);
+      if (revision !== sessionRevision) return false;
+      currentMode = conversation.mode === 'general' ? 'research' : conversation.mode || 'chat';
+      modeDropdownItems.forEach((item) => item.classList.toggle('active', item.dataset.mode === currentMode));
+      if (modeDropdownLabel) modeDropdownLabel.textContent = currentMode.charAt(0).toUpperCase() + currentMode.slice(1);
+      activeConversationTitle = conversation.title || 'Untitled conversation';
+      setConversationId(conversation.id);
+      streamContainer.innerHTML = '';
+      const unfinished = (conversation.runs || []).filter((run) => !['done', 'failed', 'cancelled', 'canceled'].includes(run.status));
+      const unfinishedIds = new Set(unfinished.map((run) => run.id));
+      const messages = [...(conversation.messages || [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      messages.forEach((message) => {
+        if (message.role === 'user') appendUserBubble(message.content, []);
+        else if (message.role === 'assistant' && !unfinishedIds.has(message.run_id)) {
+          const bubble = document.createElement('div');
+          bubble.className = 'message-bubble agent';
+          bubble.innerHTML = `<div class="bubble-header"><span class="tool-dot"></span><span>Jevora</span></div><div class="bubble-content md-content">${renderMarkdown(message.content)}</div>`;
+          streamContainer.appendChild(bubble);
+        }
+      });
+      if (!messages.length && !unfinished.length) streamContainer.innerHTML = '<div class="conversation-empty"><strong>This conversation is ready</strong><span>Send a message to pick up where you left off.</span></div>';
+      unfinished.forEach((run) => {
+        const view = new RunView(run.id, `IDE Agent (${currentMode.toUpperCase()}) · Live run`);
+        streamContainer.appendChild(view.el);
+        view.setStatus(run.status);
+        if (run.escalation) view.showEscalation(run.escalation);
+        streamRun(view);
+      });
+      scrollMessagesToBottom();
+      return true;
+    } catch (error) {
+      if (revision !== sessionRevision) return false;
+      if (error.status === 404 || error.status === 403) setConversationId(null);
+      streamContainer.innerHTML = `<div class="conversation-empty"><strong>${restoring ? 'Could not restore your conversation' : 'Could not open conversation'}</strong><span>${escapeHtml(error.message)}</span><button class="chip-btn" type="button">Try again</button></div>`;
+      streamContainer.querySelector('button').addEventListener('click', () => openConversation(id));
+      return false;
+    } finally {
+      if (revision === sessionRevision) { conversationLoading = false; updateConversationComposer(); }
+    }
   }
 
-  async function showRunDetails(runId) {
-    drawerBody.innerHTML = '<div class="drawer-muted">Loading…</div>';
-    let run;
-    let tree;
-    try { [run, tree] = await Promise.all([api.get(`/api/runs/${runId}`), api.get(`/api/runs/${runId}/tree`)]); }
-    catch (error) { drawerBody.innerHTML = `<div class="drawer-card">${escapeHtml(error.message)}</div>`; return; }
-    drawerBody.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px;">
-      <button class="chip-btn" type="button" id="historyBack" style="align-self:flex-start">← Back</button>
-      <div class="drawer-card"><div style="font-size:11px;color:var(--text-secondary);">${escapeHtml(formatTime(run.created_at))} · ${escapeHtml(run.mode)} · ${escapeHtml(run.status)}</div>
-        <strong style="display:block;margin-top:4px">${escapeHtml(run.task)}</strong>
-        <div class="drawer-muted" style="margin-top:4px">${run.total_tokens} tokens · $${(run.cost_estimate || 0).toFixed(4)}${run.vault_note_path ? ` · vault: ${escapeHtml(run.vault_note_path)}` : ''}</div></div>
-      <div class="drawer-card"><div class="drawer-section-label">AGENT TREE</div>${treeHtml(tree.roots) || '<div class="drawer-muted">No agent calls.</div>'}</div>
-      <div class="drawer-card md-content">${renderMarkdown(run.final_output || '')}</div>
-      <div style="display:flex;gap:8px">${run.status === 'failed' && !run.cancelled ? '<button class="chip-btn" type="button" id="historyResume">Resume</button>' : ''}
-        <button class="chip-btn danger" type="button" id="historyDelete">Delete</button></div></div>`;
-    $('historyBack').addEventListener('click', () => renderHistoryDrawer());
-    $('historyDelete').addEventListener('click', async () => {
-      try { await api.del(`/api/runs/${runId}`); showToast('Run deleted'); renderHistoryDrawer(); } catch (error) { showToast(error.message); }
-    });
-    $('historyResume')?.addEventListener('click', async () => {
-      try { await api.post(`/api/runs/${runId}/resume`); showToast('Run resumed'); closeDrawer(); } catch (error) { showToast(error.message); }
-    });
+  async function restoreConversation(revision) {
+    if (revision !== sessionRevision) return;
+    let savedId;
+    try { savedId = localStorage.getItem(conversationStorageKey()); } catch (_) { return; }
+    if (savedId) await openConversation(savedId, { restoring: true });
   }
 
   // ---- VMs ------------------------------------------------------------------
@@ -1242,6 +1479,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (currentDrawer === 'files') refreshFilesDrawer();
         } else if (event.type === 'run.status' && TERMINAL.includes(event.data.status)) {
           refreshStatus();
+          refreshConversationLists();
         }
       };
       ws.onclose = () => setTimeout(open, 3000);
@@ -1501,6 +1739,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 10. Boot
   // =========================================================================
   async function boot() {
+    const revision = sessionRevision;
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') === 'success') {
       await api.refresh();
@@ -1510,6 +1749,9 @@ document.addEventListener('DOMContentLoaded', () => {
       currentUser = await api.get('/api/auth/me');
       renderProfile();
     } catch (_) { /* backend offline */ }
+    if (revision !== sessionRevision && !conversationLoading) setConversationId(conversationId);
+    await restoreConversation(revision);
+    loadRecentConversations();
     try {
       features = await api.get('/api/features');
       const webItem = $('webSearchMenuItem');

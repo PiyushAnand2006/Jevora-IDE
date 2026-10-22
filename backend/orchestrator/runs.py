@@ -9,10 +9,11 @@ from typing import Any
 from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from backend.conversations import owned_conversation, save_message
 from backend.core.errors import AppError, Conflict, NotFound
 from backend.core.events import EventBus
 from backend.core.ids import iso, new_id, utcnow
-from backend.db.models import AgentCall, Artifact, Decision, EscalationRequest, Run
+from backend.db.models import AgentCall, Artifact, Conversation, Decision, EscalationRequest, Run
 from backend.orchestrator.approvals import ApprovalBroker
 from backend.orchestrator.executor import RunExecutor
 from backend.orchestrator.recorder import RunRecorder
@@ -88,11 +89,24 @@ class RunService:
                   attachments=list(attachments or []), agent_id=agent_id, conversation_id=conversation_id,
                   workspace_id=workspace_id, status="queued", meta=meta or {})
         async with self.sessions() as session:
+            conversation = None
+            if conversation_id is not None:
+                conversation = await owned_conversation(session, user_id, conversation_id, mode)
+            elif mode == "chat":
+                conversation = Conversation(user_id=user_id, title=text.splitlines()[0][:120], mode=mode)
+                session.add(conversation)
+                await session.flush()
+            if conversation is not None:
+                run.conversation_id = conversation.id
+                conversation.updated_at = utcnow()
+                if mode == "chat":
+                    await save_message(session, conversation, run.id, "user", text)
             session.add(run)
             await session.commit()
             await session.refresh(run)
         self.events.publish("run.created", user_id=user_id, run_id=run.id,
-                            data={"mode": mode, "task": text[:300], "agent_id": agent_id})
+                            data={"mode": mode, "task": text[:300], "agent_id": agent_id,
+                                  "conversation_id": run.conversation_id})
         self.events.publish("run.status", user_id=user_id, run_id=run.id, data={"status": "queued", "mode": mode})
         self.executor.submit(run.id, user_id)
         return run

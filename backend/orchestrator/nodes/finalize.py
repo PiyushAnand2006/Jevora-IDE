@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from backend.agents.templates import template
+from backend.conversations import owned_conversation, save_message
 from backend.core.logging import get_logger
-from backend.db.models import Conversation, Message, Run
+from backend.db.models import Conversation, Run
 from backend.decision.schemas import Evidence
 from backend.orchestrator.nodes.common import ctx_for, set_status
 from backend.orchestrator.nodes.researcher import sources_footer
@@ -137,15 +138,18 @@ async def _save_conversation(o: Orchestrator, state: GraphState, output: str) ->
         return
     rc = ctx_for(o, state)
     async with o.app.sessions() as session:
-        conversation_id = state.get("conversation_id")
-        conversation = await session.get(Conversation, conversation_id) if conversation_id else None
-        if conversation is None or conversation.user_id != rc.user_id:
+        run = await session.get(Run, rc.run_id)
+        conversation_id = state.get("conversation_id") or (run.conversation_id if run else None)
+        if conversation_id:
+            conversation = await owned_conversation(session, rc.user_id, conversation_id, "chat")
+        else:
+            # Compatibility for pre-conversation runs/checkpoints. New runs allocate
+            # their conversation before scheduling; retries reuse the ID on the run.
             conversation = Conversation(user_id=rc.user_id, title=state["task"][:120], mode="chat")
             session.add(conversation)
             await session.flush()
-        session.add(Message(conversation_id=conversation.id, role="user", content=state["task"], run_id=rc.run_id))
-        session.add(Message(conversation_id=conversation.id, role="assistant", content=output, run_id=rc.run_id))
-        run = await session.get(Run, rc.run_id)
+        await save_message(session, conversation, rc.run_id, "user", state["task"])
+        await save_message(session, conversation, rc.run_id, "assistant", output)
         if run is not None:
             run.conversation_id = conversation.id
         await session.commit()

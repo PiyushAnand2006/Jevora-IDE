@@ -20,6 +20,7 @@ from backend.api import (
     agents,
     attachments,
     auth,
+    conversations,
     extras,
     mcp,
     providers,
@@ -84,8 +85,8 @@ def create_app(settings: Settings | None = None,
         response.headers["X-Response-Time-Ms"] = f"{(time.perf_counter() - started) * 1000:.1f}"
         return response
 
-    for module in (auth, providers, runs, agents, workspace, terminal, vms, vault, extras, mcp, attachments,
-                   system):
+    for module in (auth, providers, runs, conversations, agents, workspace, terminal, vms, vault, extras, mcp,
+                   attachments, system):
         app.include_router(module.router)
 
     if settings.frontend_dir.exists():

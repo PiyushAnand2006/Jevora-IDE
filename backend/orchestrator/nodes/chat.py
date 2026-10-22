@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
+from backend.conversations import owned_conversation
 from backend.db.models import Message
 from backend.orchestrator.nodes.common import (
     attachment_context,
@@ -22,23 +23,24 @@ if TYPE_CHECKING:
     from backend.orchestrator.graph import Orchestrator
     from backend.orchestrator.state import GraphState
 
-HISTORY_MESSAGES = 20
-
-
-async def conversation_history(o: Orchestrator, conversation_id: str | None) -> list[ChatMessage]:
+async def conversation_history(o: Orchestrator, conversation_id: str | None, user_id: str,
+                               run_id: str) -> list[ChatMessage]:
     if not conversation_id:
         return []
     async with o.app.sessions() as session:
-        rows = list(await session.scalars(select(Message).where(Message.conversation_id == conversation_id)
-                                          .order_by(Message.created_at.desc()).limit(HISTORY_MESSAGES)))
-    return [ChatMessage(role="assistant" if m.role == "assistant" else "user", content=m.content[:8000])
-            for m in reversed(rows)]
+        await owned_conversation(session, user_id, conversation_id, "chat")
+        rows = list(await session.scalars(select(Message).where(
+            Message.conversation_id == conversation_id, or_(Message.run_id.is_(None), Message.run_id != run_id))
+            .order_by(Message.created_at, Message.id)))
+    # Projection happens after system/context/tool assembly in the runtime. Persisted
+    # contents remain complete, even for messages larger than the current window.
+    return [ChatMessage(role="assistant" if m.role == "assistant" else "user", content=m.content) for m in rows]
 
 
 async def chat(o: Orchestrator, state: GraphState) -> dict[str, Any]:
     rc = ctx_for(o, state)
     await set_status(o, state, "running")
-    history = await conversation_history(o, state.get("conversation_id"))
+    history = await conversation_history(o, state.get("conversation_id"), rc.user_id, rc.run_id)
     attachments = await load_attachments(o, state)
     rc.image_parts = image_parts(attachments)
     config = await worker_config(o, state, "chat")

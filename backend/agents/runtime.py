@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend.agents.config import AgentConfig
+from backend.agents.context import project_history
 from backend.agents.memory import MemoryService
 from backend.agents.pool import CallNode, RunScope, task_key
 from backend.agents.templates import BUILTIN_TEMPLATES, template
@@ -153,8 +154,11 @@ class AgentRuntime:
     # ------------------------------------------------------------------ prompt
     async def _system_prompt(self, rc: RunContext, config: AgentConfig, task: str, sandbox_kind: str) -> str:
         today = datetime.now(UTC).strftime("%Y-%m-%d")
-        parts = [config.system_prompt.strip(),
-                 f"\nEnvironment: workspace root is '.', commands run in a {sandbox_kind} sandbox; today is {today}."]
+        parts = [prompt.strip() for prompt in (self.app.settings.acting_brain_system_prompt, config.system_prompt)
+                 if prompt.strip()]
+        parts.append(
+            f"Environment: workspace root is '.', commands run in a {sandbox_kind} sandbox; today is {today}."
+        )
         if config.memory_scope == "agent":
             notes = await self.memory.agent_notes(rc.user_id, config.name)
             if notes:
@@ -244,7 +248,7 @@ class AgentRuntime:
             first = ChatMessage(role="user", content=[ContentPart(type="text", text=user_text), *rc.image_parts])
         else:
             first = ChatMessage(role="user", content=user_text)
-        messages = [ChatMessage(role="system", content=system), *(history or []), first]
+        messages = [ChatMessage(role="system", content=system), first]
         text_mode = False
         signatures: Counter[str] = Counter()
         meta = CallMeta(user_id=rc.user_id, run_id=rc.run_id, call_id=node.call_id, category=chosen_category)
@@ -279,6 +283,10 @@ class AgentRuntime:
             if text_mode:
                 convo = [ChatMessage(role="system", content=system + "\n\n" + _text_tool_prompt(specs)),
                          *messages[1:]]
+            if history:
+                projected = project_history(history, convo, [] if text_mode else specs,
+                                            self.app.settings.context_window_tokens)
+                convo = [convo[0], *projected, *convo[1:]]
             try:
                 response = await self.app.router.chat(
                     meta, convo, bindings=bindings, tools=None if text_mode else (specs or None), stream=stream,

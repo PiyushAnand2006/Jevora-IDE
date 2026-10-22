@@ -41,6 +41,19 @@ async def test_agent_tool_loop_writes_files(harness: AppHarness, mock_llm: MockL
     assert {"agent.started", "tool.call", "tool.result", "agent.finished"} <= set(types)
 
 
+async def test_acting_brain_system_prompt_is_injected(harness: AppHarness, mock_llm: MockLLM) -> None:
+    await add_mock_provider(harness.client, mock_llm)
+    harness.ctx.settings.acting_brain_system_prompt = "Acting brain instruction: complete the user's request."
+
+    rc = await make_run_context(harness.ctx)
+    result = await harness.ctx.runtime.run_agent(rc, template("coder"), "describe the workspace")
+
+    assert result.status == "done"
+    system = mock_llm.requests[-1]["messages"][0]["content"]
+    assert system.startswith("Acting brain instruction: complete the user's request.")
+    assert "You are the coding agent." in system
+
+
 async def test_subagent_lineage_and_narrowing(harness: AppHarness, mock_llm: MockLLM) -> None:
     await add_mock_provider(harness.client, mock_llm)
 
