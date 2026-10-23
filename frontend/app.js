@@ -637,7 +637,15 @@ document.addEventListener('DOMContentLoaded', () => {
       switch (event.type) {
         case 'run.status':
           this.setStatus(data.status);
-          if (TERMINAL.includes(data.status)) return 'terminal';
+          if (TERMINAL.includes(data.status)) {
+            // Release the composer as soon as the durable run status is terminal.
+            // The follow-up GET only hydrates the final output; a failed or lost
+            // reconciliation request must not leave the UI stuck in "working".
+            this.finished = true;
+            updateConversationComposer();
+            refreshStatus();
+            return 'terminal';
+          }
           break;
         case 'agent.started':
           this.node(event.call_id, event.parent_call_id, data);
@@ -1572,14 +1580,28 @@ document.addEventListener('DOMContentLoaded', () => {
   [modelPopover, providerListPanel, customProviderPanel].forEach((el) => el?.addEventListener('click', (e) => e.stopPropagation()));
 
   const modelItems = document.querySelectorAll('.model-list-item');
+  function syncSelectedModelUI() {
+    modelItems.forEach((item) => {
+      const isBuiltin = item.dataset.model === selectedModel.key;
+      item.classList.toggle('active', isBuiltin);
+    });
+    providerModelsList?.querySelectorAll('.provider-model-item').forEach((item) => {
+      item.classList.toggle('active', item.dataset.modelKey === selectedModel.key);
+    });
+  }
+
+  function setSelectedModel(key, label) {
+    selectedModel = { key, label };
+    syncSelectedModelUI();
+    if (modelBadge) modelBadge.textContent = `${label} ›`;
+  }
+
   modelItems.forEach((item) => {
     item.addEventListener('click', () => {
       if (item.classList.contains('unavailable')) { showToast('Add the matching provider first (Add Provider below)'); return; }
-      modelItems.forEach((i) => i.classList.remove('active'));
       item.classList.add('active');
       const modelName = item.querySelector('.model-item-name')?.textContent || item.dataset.model;
-      selectedModel = { key: item.dataset.model, label: modelName };
-      if (modelBadge) modelBadge.textContent = `${modelName} ›`;
+      setSelectedModel(item.dataset.model, modelName);
       showToast(`Model set to ${modelName}`);
       closeAllPanels();
     });
@@ -1709,15 +1731,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const item = document.createElement('button');
         item.className = 'provider-model-item';
         item.type = 'button';
+        item.dataset.modelKey = `${provider.id}:${model}`;
         item.textContent = model;
         item.addEventListener('click', () => {
-          selectedModel = { key: `${provider.id}:${model}`, label: model };
+          setSelectedModel(`${provider.id}:${model}`, model);
           if (modelBadge) modelBadge.textContent = `${provider.name} · ${model} ›`;
           showToast(`Model set to ${model}`);
           closeAllPanels();
         });
         providerModelsList.appendChild(item);
       });
+      syncSelectedModelUI();
       if (modelBadge) modelBadge.textContent = `${provider.name} ›`;
       showToast(`${models.length} model${models.length === 1 ? '' : 's'} loaded from ${provider.name}`);
     } catch (_) {

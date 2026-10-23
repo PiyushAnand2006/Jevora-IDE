@@ -64,6 +64,9 @@ function harness(saved = {}) {
   const modes = ['build', 'chat', 'research', 'analysis'].map((mode) => {
     const item = new Element('button'); item.dataset.mode = mode; return item;
   });
+  const modelItems = ['auto', 'gpt-4o', 'claude-3-7-sonnet', 'gemini-2-5-pro', 'local'].map((model) => {
+    const item = new Element('button'); item.dataset.model = model; item.className = 'model-list-item'; return item;
+  });
   const document = {
     getElementById: $,
     createElement: (tag) => new Element(tag),
@@ -71,7 +74,8 @@ function harness(saved = {}) {
       if (!selectors.has(selector)) selectors.set(selector, new Element());
       return selectors.get(selector);
     },
-    querySelectorAll: (selector) => selector === '.mode-dropdown-item' ? modes : [],
+    querySelectorAll: (selector) => selector === '.mode-dropdown-item' ? modes
+      : selector === '.model-list-item' ? modelItems : [],
     addEventListener: (name, handler) => { if (name === 'DOMContentLoaded') handler(); },
     body: new Element('body'),
   };
@@ -102,6 +106,7 @@ function harness(saved = {}) {
     window.controller = {
       api, openConversation, resetConversation, runAgentTask, renderHistoryDrawer,
       loadHistory, loadRecentConversations, restoreConversation, renderConversationRows,
+      setSelectedModel, syncSelectedModelUI,
       getState: () => ({ conversationId, currentMode, sessionRevision, runStarting, views: [...activeRunViews] }),
       setUser: (user) => { currentUser = user; },
       key: conversationStorageKey,
@@ -109,7 +114,7 @@ function harness(saved = {}) {
   const controller = window.controller;
   controller.api.get = async () => ({});
   controller.api.post = async () => ({});
-  return { ...controller, $, storage, sockets, modes, timers };
+  return { ...controller, $, storage, sockets, modes, modelItems, timers };
 }
 
 function deferred() { let resolve; let reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
@@ -290,6 +295,26 @@ test('a terminal fetch that resolves after switching conversations cannot finali
   assert.equal(h.$('sendBtn').disabled, false);
 });
 
+
+test('a terminal stream event releases the composer when final reconciliation fails', async () => {
+  const h = harness();
+  h.api.post = async () => ({ id: 'run-1', conversation_id: 'conversation-1', status: 'running' });
+  await h.runAgentTask('Task', []);
+  const view = h.getState().views[0];
+  h.api.get = async (url) => {
+    if (url.includes('/api/runs/run-1')) throw new Error('temporary reconciliation failure');
+    if (url === '/api/agents/status') return { agents_running: 0, subagents_running: 0 };
+    return {};
+  };
+
+  h.sockets[0].message({ type: 'run.status', data: { status: 'done' } });
+  await flush();
+
+  assert.equal(view.finished, true);
+  assert.equal(h.$('sendBtn').disabled, false);
+  assert.notEqual(h.$('agentInput').placeholder, 'The agent is working…');
+});
+
 test('a first message takes priority over boot restoration while its POST is pending', async () => {
   const h = harness({ 'jevora_active_conversation:local:/workspace': 'previous' });
   const pending = deferred();
@@ -303,4 +328,12 @@ test('a first message takes priority over boot restoration while its POST is pen
   await posting;
   assert.equal(h.getState().conversationId, 'new');
   assert.equal(h.storage.get(h.key()), 'new');
+});
+
+test('selecting a provider model clears Auto selection and highlights the provider model', () => {
+  const h = harness();
+  const auto = h.modelItems[0];
+  auto.className = 'model-list-item active';
+  h.setSelectedModel('provider-1:step-5-preview', 'step-5-preview');
+  assert.equal(auto.classList.contains('active'), false);
 });
