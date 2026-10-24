@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
@@ -106,6 +107,70 @@ async def test_signup_validation(secured: AppHarness) -> None:
             ).status_code == 422
     assert (await secured.client.post("/api/auth/signup", json={"email": "a@b.co", "password": "short"})
             ).status_code == 422
+
+
+async def test_password_reset_otp_updates_hashed_password_and_revokes_sessions(secured: AppHarness) -> None:
+    client = secured.client
+    created = await _signup(client, "reset@example.com")
+    old_access = created["access_token"]
+
+    requested = await client.post("/api/auth/forgot-password", json={"email": "RESET@example.com"})
+    assert requested.status_code == 200
+    assert "password" not in requested.text.lower()
+    message = secured.ctx.mailer.outbox[-1].body
+    match = re.search(r"code is: (\d{6})", message)
+    assert match is not None
+    otp = match.group(1)
+
+    wrong = await client.post("/api/auth/verify-password-reset-otp", json={
+        "email": "reset@example.com", "otp": "000000" if otp != "000000" else "111111"})
+    assert wrong.status_code == 401
+    verified = await client.post("/api/auth/verify-password-reset-otp", json={
+        "email": "reset@example.com", "otp": otp})
+    assert verified.status_code == 200 and verified.json()["reset_token"]
+
+    reset = await client.post("/api/auth/reset-password", json={
+        "reset_token": verified.json()["reset_token"], "new_password": "new-correct-horse-2"})
+    assert reset.status_code == 200
+    me_old = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {old_access}"})
+    assert me_old.status_code == 200  # Access JWTs remain valid until expiry.
+
+    old_login = await client.post("/api/auth/login", json={"email": "reset@example.com", "password": "correct-horse-1"})
+    assert old_login.status_code == 401
+    new_login = await client.post("/api/auth/login", json={
+        "email": "reset@example.com", "password": "new-correct-horse-2"})
+    assert new_login.status_code == 200
+
+    async with secured.ctx.sessions() as session:
+        from backend.db.models import User
+        user = await session.get(User, created["user"]["id"])
+    assert user is not None and user.password_hash and "new-correct-horse-2" not in user.password_hash
+
+
+async def test_authenticated_history_and_settings_are_user_scoped(secured: AppHarness) -> None:
+    client = secured.client
+    first = await _signup(client, "first@example.com")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    created_run = await client.post("/api/runs", headers=first_headers,
+                                    json={"text": "first user's private history", "mode": "chat"})
+    assert created_run.status_code == 201
+    await client.post("/api/providers", headers=first_headers,
+                      json={"name": "First provider", "base_url": "http://localhost:9999/v1"})
+    await client.put("/api/decision/config", headers=first_headers,
+                     json={"escalation_threshold": 0.91})
+
+    second = await _signup(client, "second@example.com")
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+    assert (await client.get("/api/conversations", headers=second_headers)).json()["items"] == []
+    assert (await client.get("/api/providers", headers=second_headers)).json() == []
+    second_config = (await client.get("/api/decision/config", headers=second_headers)).json()
+    assert second_config["config"]["escalation_threshold"] == 0.65
+
+    first_history = (await client.get("/api/conversations", headers=first_headers)).json()["items"]
+    assert any("first user's private history" in item["title"] for item in first_history)
+    assert (await client.get("/api/providers", headers=first_headers)).json()[0]["name"] == "First provider"
+    first_config = (await client.get("/api/decision/config", headers=first_headers)).json()
+    assert first_config["config"]["escalation_threshold"] == 0.91
 
 
 async def test_oauth_not_configured_returns_501(client: httpx.AsyncClient) -> None:
