@@ -6,6 +6,9 @@ design.md
 *.webp
 *.ico
 
+# Auth page background supplied for the sign-in experience.
+!frontend/auth_bg.jpg
+
 .freebuff
 
 # Local runtime state — may contain encrypted credentials, keys and private run history.
@@ -22,6 +25,20 @@ __pycache__/
 
 # Tooling
 .venv/
+.venv_tmp/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+pytest-of-thaku/
+
+# Local server logs and temporary certificates/directories.
+.jevora-server*.log
+tmp*.pem
+tmp*/
+
+# pip temporary installation directories
+pip-build-tracker-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+pip-metadata-*/
+pip-unpack-*/
