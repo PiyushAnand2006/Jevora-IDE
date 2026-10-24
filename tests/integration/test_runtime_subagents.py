@@ -54,6 +54,14 @@ async def test_acting_brain_system_prompt_is_injected(harness: AppHarness, mock_
     assert "You are the coding agent." in system
 
 
+async def test_project_acting_brain_prompt_is_loaded_from_prompt_file() -> None:
+    from backend.agents.prompts import DEFAULT_ACTING_BRAIN_SYSTEM_PROMPT, PROMPT_PATH
+
+    assert PROMPT_PATH.name == "system_prompt.md"
+    assert PROMPT_PATH.read_text(encoding="utf-8").strip() == DEFAULT_ACTING_BRAIN_SYSTEM_PROMPT
+    assert DEFAULT_ACTING_BRAIN_SYSTEM_PROMPT.startswith("# System prompt")
+
+
 async def test_subagent_lineage_and_narrowing(harness: AppHarness, mock_llm: MockLLM) -> None:
     await add_mock_provider(harness.client, mock_llm)
 
