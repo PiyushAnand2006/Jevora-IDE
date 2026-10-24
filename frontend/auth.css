@@ -9,6 +9,11 @@
   box-sizing: border-box;
 }
 
+/* Keep the HTML hidden attribute authoritative even when a component has a display rule. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   color: #0f172a;
@@ -505,6 +510,32 @@ body {
 .switch-link-btn:hover {
   color: #1d4ed8;
   text-decoration: underline;
+}
+
+.forgot-link {
+  align-self: flex-end;
+  font-size: 12px;
+}
+
+.forgot-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.forgot-panel[hidden],
+.forgot-step[hidden] {
+  display: none !important;
+}
+
+.forgot-help {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.forgot-back-btn {
+  align-self: center;
 }
 
 /* Responsive adjustments */

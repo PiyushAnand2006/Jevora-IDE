@@ -188,6 +188,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return `jevora_active_conversation:${currentUser?.id || 'local'}:${window.location.pathname}`;
   }
 
+  function providerStorageKey() {
+    // Local mode keeps the legacy preview key; authenticated users get an
+    // account-specific browser cache so one user's providers never appear for another.
+    return currentUser && !currentUser.is_local ? `jevora_providers:${currentUser.id}` : 'jevora_providers';
+  }
+
   function setConversationId(id) {
     conversationId = id || null;
     try {
@@ -1517,8 +1523,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const providerModelsList = $('providerModelsList');
 
   // Only non-secret provider metadata is cached in the browser; API keys live encrypted in the backend.
-  let savedProviders = JSON.parse(localStorage.getItem('jevora_providers') || '[]').map((p) => ({ id: p.id, name: p.name, url: p.url }));
-  localStorage.setItem('jevora_providers', JSON.stringify(savedProviders));
+  let savedProviders = [];
+  function loadSavedProviders() {
+    try {
+      savedProviders = JSON.parse(localStorage.getItem(providerStorageKey()) || '[]')
+        .map((p) => ({ id: p.id, name: p.name, url: p.url }));
+    } catch (_) { savedProviders = []; }
+  }
+  loadSavedProviders();
   let selectedModel = { key: 'auto', label: 'Auto' };
 
   const PANEL_NONE = 0; const PANEL_MODEL = 1; const PANEL_PROVIDERS = 2; const PANEL_CUSTOM = 3;
@@ -1660,7 +1672,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function persistProviders() {
-    localStorage.setItem('jevora_providers', JSON.stringify(savedProviders.map((p) => ({ id: p.id, name: p.name, url: p.url }))));
+    try {
+      localStorage.setItem(providerStorageKey(), JSON.stringify(savedProviders.map((p) => ({ id: p.id, name: p.name, url: p.url }))));
+    } catch (_) { /* Private browsing can disable persistence. */ }
   }
 
   async function saveProvider(provider) {
@@ -1771,6 +1785,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     try {
       currentUser = await api.get('/api/auth/me');
+      loadSavedProviders();
       renderProfile();
     } catch (_) { /* backend offline */ }
     if (revision !== sessionRevision && !conversationLoading) setConversationId(conversationId);

@@ -222,6 +222,8 @@
                 Sign In
               </button>
 
+              <button type="button" class="switch-link-btn forgot-link" id="forgotPasswordBtn">Forgot password?</button>
+
               <!-- "or" Divider -->
               <div class="auth-divider">
                 <span class="divider-line"></span>
@@ -256,6 +258,43 @@
               </p>
             </form>
 
+            <section class="forgot-panel" id="forgotPanel" hidden>
+              <div class="forgot-step" id="forgotRequestStep">
+                <p class="forgot-help">Enter the registered email</p>
+                <form class="auth-form" id="forgotRequestForm">
+                  <div class="auth-input-group">
+                    <input type="email" class="auth-input" id="forgotEmailInput" placeholder="Email Address" required autocomplete="email" />
+                  </div>
+                  <button type="submit" class="auth-primary-btn" id="sendOtpBtn">Send login OTP</button>
+                </form>
+              </div>
+
+              <div class="forgot-step" id="forgotOtpStep" hidden>
+                <p class="forgot-help" id="otpHelp">Enter the 6-digit code sent to your email.</p>
+                <form class="auth-form" id="forgotOtpForm">
+                  <div class="auth-input-group">
+                    <input type="text" class="auth-input" id="otpInput" placeholder="6-digit OTP" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" required autocomplete="one-time-code" />
+                  </div>
+                  <button type="submit" class="auth-primary-btn" id="verifyOtpBtn">Verify code</button>
+                </form>
+              </div>
+
+              <div class="forgot-step" id="forgotResetStep" hidden>
+                <p class="forgot-help">Choose a new password for your Jevora IDE account.</p>
+                <form class="auth-form" id="forgotResetForm">
+                  <div class="auth-input-group">
+                    <input type="password" class="auth-input" id="newPasswordInput" placeholder="New password" minlength="8" maxlength="256" required autocomplete="new-password" />
+                  </div>
+                  <div class="auth-input-group">
+                    <input type="password" class="auth-input" id="confirmPasswordInput" placeholder="Confirm new password" minlength="8" maxlength="256" required autocomplete="new-password" />
+                  </div>
+                  <button type="submit" class="auth-primary-btn" id="resetPasswordBtn">Set new password</button>
+                </form>
+              </div>
+
+              <button type="button" class="switch-link-btn forgot-back-btn" id="forgotBackBtn">Back to sign in</button>
+            </section>
+
           </div>
         </aside>
 
@@ -265,8 +304,8 @@
   </div>
 
   <script>
-    // State toggle between Sign In and Create Account
     let isSignUp = false;
+    let resetToken = '';
 
     const authTitle = document.getElementById('authTitle');
     const authSubtitle = document.getElementById('authSubtitle');
@@ -274,43 +313,21 @@
     const switchPrompt = document.getElementById('switchPrompt');
     const switchModeBtn = document.getElementById('switchModeBtn');
     const nameGroup = document.getElementById('nameGroup');
-    const authForm = document.getElementById('authForm');
-    const eyeToggleBtn = document.getElementById('eyeToggleBtn');
-    const passwordInput = document.getElementById('passwordInput');
-
-    // Toggle Password Visibility
-    eyeToggleBtn.addEventListener('click', () => {
-      const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
-      passwordInput.setAttribute('type', type);
-      eyeToggleBtn.classList.toggle('active', type === 'text');
-    });
-
-    // Toggle Sign In / Sign Up Mode
-    switchModeBtn.addEventListener('click', () => {
-      isSignUp = !isSignUp;
-      if (isSignUp) {
-        authTitle.textContent = 'Create an account';
-        authSubtitle.textContent = 'Sign up to start building with Jevora IDE';
-        submitBtn.textContent = 'Sign Up';
-        switchPrompt.textContent = 'Already have an account?';
-        switchModeBtn.textContent = 'Sign in';
-        nameGroup.style.display = 'flex';
-        passwordInput.setAttribute('autocomplete', 'new-password');
-      } else {
-        authTitle.textContent = 'Welcome back';
-        authSubtitle.textContent = 'Sign in to continue to your workspace';
-        submitBtn.textContent = 'Sign In';
-        switchPrompt.textContent = 'New here?';
-        switchModeBtn.textContent = 'Create an account';
-        nameGroup.style.display = 'none';
-        passwordInput.setAttribute('autocomplete', 'current-password');
-      }
-      showMessage('');
-    });
-
-    const authMessage = document.getElementById('authMessage');
     const nameInput = document.getElementById('nameInput');
     const emailInput = document.getElementById('emailInput');
+    const passwordInput = document.getElementById('passwordInput');
+    const authForm = document.getElementById('authForm');
+    const authMessage = document.getElementById('authMessage');
+    const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
+    const forgotPanel = document.getElementById('forgotPanel');
+    const forgotRequestStep = document.getElementById('forgotRequestStep');
+    const forgotOtpStep = document.getElementById('forgotOtpStep');
+    const forgotResetStep = document.getElementById('forgotResetStep');
+    const forgotEmailInput = document.getElementById('forgotEmailInput');
+    const otpHelp = document.getElementById('otpHelp');
+    const otpInput = document.getElementById('otpInput');
+    const newPasswordInput = document.getElementById('newPasswordInput');
+    const confirmPasswordInput = document.getElementById('confirmPasswordInput');
 
     function showMessage(text, kind = 'error') {
       authMessage.textContent = text;
@@ -323,7 +340,80 @@
       submitBtn.textContent = isSignUp ? 'Sign Up' : 'Sign In';
     }
 
-    // Form submission: real email/password auth against the local backend.
+    function setAuthMode(signUp) {
+      isSignUp = signUp;
+      authTitle.textContent = isSignUp ? 'Create an account' : 'Welcome back';
+      authSubtitle.textContent = isSignUp ? 'Sign up to start building with Jevora IDE' : 'Sign in to continue to your workspace';
+      submitBtn.textContent = isSignUp ? 'Sign Up' : 'Sign In';
+      switchPrompt.textContent = isSignUp ? 'Already have an account?' : 'New here?';
+      switchModeBtn.textContent = isSignUp ? 'Sign in' : 'Create an account';
+      nameGroup.style.display = isSignUp ? 'flex' : 'none';
+      nameInput.required = isSignUp;
+      passwordInput.setAttribute('autocomplete', isSignUp ? 'new-password' : 'current-password');
+      forgotPasswordBtn.hidden = isSignUp;
+      showMessage('');
+    }
+
+    function showForgotStep(step) {
+      forgotRequestStep.hidden = step !== 'request';
+      forgotOtpStep.hidden = step !== 'otp';
+      forgotResetStep.hidden = step !== 'reset';
+    }
+
+    function showForgotPanel() {
+      authForm.hidden = true;
+      forgotPasswordBtn.hidden = true;
+      document.querySelector('.auth-divider').hidden = true;
+      document.querySelector('.social-auth-row').hidden = true;
+      document.querySelector('.auth-switch-text').hidden = true;
+      forgotPanel.hidden = false;
+      showForgotStep('request');
+      forgotEmailInput.value = emailInput.value.trim();
+      authTitle.textContent = 'Reset your password';
+      authSubtitle.textContent = 'Verify your email to choose a new password';
+      showMessage('');
+      forgotEmailInput.focus();
+    }
+
+    function showSignInPanel(message = '') {
+      forgotPanel.hidden = true;
+      authForm.hidden = false;
+      forgotPasswordBtn.hidden = false;
+      document.querySelector('.auth-divider').hidden = false;
+      document.querySelector('.social-auth-row').hidden = false;
+      document.querySelector('.auth-switch-text').hidden = false;
+      setAuthMode(false);
+      showMessage(message, 'success');
+    }
+
+    async function postJson(path, body) {
+      const response = await fetch(path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        let detail = data.detail;
+        if (Array.isArray(detail)) detail = detail.map((d) => d.msg).join(' ');
+        if (response.status === 429) {
+          const wait = response.headers.get('Retry-After');
+          detail = `Too many attempts. Try again${wait ? ` in ${wait}s` : ' shortly'}.`;
+        }
+        throw new Error(detail || `Request failed (HTTP ${response.status})`);
+      }
+      return data;
+    }
+
+    document.getElementById('eyeToggleBtn').addEventListener('click', () => {
+      const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+      passwordInput.setAttribute('type', type);
+      document.getElementById('eyeToggleBtn').classList.toggle('active', type === 'text');
+    });
+
+    switchModeBtn.addEventListener('click', () => setAuthMode(!isSignUp));
+    forgotPasswordBtn.addEventListener('click', showForgotPanel);
+    document.getElementById('forgotBackBtn').addEventListener('click', () => showSignInPanel());
+
     authForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       showMessage('');
@@ -332,35 +422,71 @@
       const body = { email: emailInput.value.trim(), password: passwordInput.value };
       if (isSignUp) body.name = nameInput.value.trim();
       try {
-        const response = await fetch(isSignUp ? '/api/auth/signup' : '/api/auth/login', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-          body: JSON.stringify(body),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          let detail = data.detail;
-          if (Array.isArray(detail)) {
-            detail = detail.map((d) => (d.loc?.includes('password') ? 'Password must be at least 8 characters.'
-              : d.loc?.includes('email') ? 'Please enter a valid email address.' : d.msg)).join(' ');
-          }
-          if (response.status === 429) {
-            const wait = response.headers.get('Retry-After');
-            detail = `Too many attempts. Try again${wait ? ` in ${wait}s` : ' shortly'}.`;
-          }
-          showMessage(detail || `Sign-in failed (HTTP ${response.status})`);
-          resetButton();
-          return;
-        }
+        const data = await postJson(isSignUp ? '/api/auth/signup' : '/api/auth/login', body);
         localStorage.setItem('jevora_access_token', data.access_token);
         showMessage(`Welcome${data.user?.name ? `, ${data.user.name}` : ''}! Opening your workspace…`, 'success');
         window.location.href = 'index.html';
-      } catch (_) {
-        showMessage('Unable to reach the local backend. Start it with: python -m uvicorn backend.main:app --reload');
+      } catch (error) {
+        showMessage(error.message || 'Sign-in failed');
         resetButton();
       }
     });
 
-    // OAuth (Google / GitHub): the backend returns 501 with a clear message when not configured.
+    document.getElementById('forgotRequestForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = document.getElementById('sendOtpBtn');
+      button.disabled = true;
+      showMessage('');
+      try {
+        const enteredEmail = forgotEmailInput.value.trim();
+        await postJson('/api/auth/forgot-password', { email: enteredEmail });
+        otpHelp.textContent = `The otp has been sent to ${enteredEmail}`;
+        showForgotStep('otp');
+        showMessage('Check your inbox for the OTP.', 'success');
+        otpInput.focus();
+      } catch (error) {
+        showMessage(error.message || 'Could not send the OTP');
+      } finally { button.disabled = false; }
+    });
+
+    document.getElementById('forgotOtpForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = document.getElementById('verifyOtpBtn');
+      button.disabled = true;
+      showMessage('');
+      try {
+        const data = await postJson('/api/auth/verify-password-reset-otp', {
+          email: forgotEmailInput.value.trim(), otp: otpInput.value.trim(),
+        });
+        resetToken = data.reset_token;
+        showForgotStep('reset');
+        showMessage('Code verified. Choose a new password.', 'success');
+        newPasswordInput.focus();
+      } catch (error) {
+        showMessage(error.message || 'Invalid OTP');
+      } finally { button.disabled = false; }
+    });
+
+    document.getElementById('forgotResetForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (newPasswordInput.value !== confirmPasswordInput.value) {
+        showMessage('The passwords do not match.');
+        return;
+      }
+      const button = document.getElementById('resetPasswordBtn');
+      button.disabled = true;
+      showMessage('');
+      try {
+        await postJson('/api/auth/reset-password', { reset_token: resetToken, new_password: newPasswordInput.value });
+        emailInput.value = forgotEmailInput.value.trim();
+        passwordInput.value = '';
+        resetToken = '';
+        showSignInPanel('Password updated. You can now sign in.');
+      } catch (error) {
+        showMessage(error.message || 'Could not update the password');
+      } finally { button.disabled = false; }
+    });
+
     async function startOAuth(provider) {
       showMessage('');
       try {
@@ -369,9 +495,7 @@
         const data = await response.json().catch(() => ({}));
         if (!response.ok) { showMessage(data.detail || `${provider} sign-in failed`); return; }
         window.location.href = data.url;
-      } catch (_) {
-        showMessage('Unable to reach the local backend.');
-      }
+      } catch (_) { showMessage('Unable to reach the local backend.'); }
     }
     document.getElementById('googleBtn').addEventListener('click', () => startOAuth('google'));
     document.getElementById('githubBtn').addEventListener('click', () => startOAuth('github'));
