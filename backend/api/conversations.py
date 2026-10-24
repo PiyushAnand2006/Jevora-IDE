@@ -25,11 +25,20 @@ class ConversationUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
 
 
+class ConversationBranch(BaseModel):
+    message_id: str | None = None
+
+
+class ConversationEdit(BaseModel):
+    message_id: str
+    content: str = Field(min_length=1, max_length=2_000_000)
+
+
 def _run_public(run: Run) -> dict[str, Any]:
     return {"id": run.id, "status": run.status, "mode": run.mode, "task": run.task,
             "created_at": iso(run.created_at), "started_at": iso(run.started_at),
             "finished_at": iso(run.finished_at), "error": run.error, "cancelled": run.cancelled,
-            "total_tokens": run.total_tokens, "final_output": run.final_output or ""}
+            "total_tokens": run.total_tokens, "final_output": run.final_output or "", "meta": run.meta or {}}
 
 
 async def _summaries(session: AsyncSession, conversations: list[Conversation]) -> list[dict[str, Any]]:
@@ -94,8 +103,61 @@ async def get_conversation(conversation_id: str, user: CurrentUser, ctx: Ctx) ->
         runs = list(await session.scalars(select(Run).where(
             Run.conversation_id == conversation_id, Run.user_id == user.id).order_by(Run.created_at, Run.id)))
     return {**summary, "messages": [{"id": m.id, "conversation_id": m.conversation_id, "role": m.role,
-                                    "content": m.content, "run_id": m.run_id, "created_at": iso(m.created_at)}
-                                   for m in messages], "runs": [_run_public(r) for r in runs]}
+                                     "content": m.content, "run_id": m.run_id, "created_at": iso(m.created_at)}
+                                    for m in messages], "runs": [_run_public(r) for r in runs]}
+
+
+@router.post("/api/conversations/{conversation_id}/branch", status_code=201)
+async def branch_conversation(conversation_id: str, body: ConversationBranch,
+                              user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
+    async with ctx.sessions() as session:
+        source = await owned_conversation(session, user.id, conversation_id, "chat")
+        messages = list(await session.scalars(select(Message).where(Message.conversation_id == conversation_id)
+                                              .order_by(Message.created_at, Message.id)))
+        if body.message_id is not None:
+            matching = [index for index, message in enumerate(messages) if message.id == body.message_id]
+            if not matching:
+                raise AppError("message not found", code="message_not_found", status_code=404)
+            messages = messages[:matching[0] + 1]
+        branch = Conversation(user_id=user.id, title=f"Branch: {source.title}"[:300], mode="chat")
+        session.add(branch)
+        await session.flush()
+        for message in messages:
+            session.add(Message(conversation_id=branch.id, role=message.role, content=message.content))
+        await session.commit()
+        summary = (await _summaries(session, [branch]))[0]
+    return {**summary, "messages": [{"id": message.id, "conversation_id": branch.id,
+                                      "role": message.role, "content": message.content,
+                                      "run_id": message.run_id, "created_at": iso(message.created_at)}
+                                     for message in messages], "runs": []}
+
+
+@router.post("/api/conversations/{conversation_id}/edit", status_code=201)
+async def edit_conversation_message(conversation_id: str, body: ConversationEdit,
+                                    user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
+    async with ctx.sessions() as session:
+        source = await owned_conversation(session, user.id, conversation_id, "chat")
+        messages = list(await session.scalars(select(Message).where(Message.conversation_id == conversation_id)
+                                              .order_by(Message.created_at, Message.id)))
+        matching = [index for index, message in enumerate(messages) if message.id == body.message_id]
+        if not matching:
+            raise AppError("message not found", code="message_not_found", status_code=404)
+        target = messages[matching[0]]
+        if target.role != "user":
+            raise AppError("only user messages can be edited", code="message_not_editable", status_code=422)
+        branch = Conversation(user_id=user.id, title=f"Edit: {source.title}"[:300], mode="chat")
+        session.add(branch)
+        await session.flush()
+        for message in messages[:matching[0]]:
+            session.add(Message(conversation_id=branch.id, role=message.role, content=message.content))
+        edited = Message(conversation_id=branch.id, role="user", content=body.content.strip())
+        session.add(edited)
+        await session.commit()
+        summary = (await _summaries(session, [branch]))[0]
+    return {**summary, "messages": [{"id": message.id, "conversation_id": branch.id,
+                                      "role": message.role, "content": message.content,
+                                      "run_id": message.run_id, "created_at": iso(message.created_at)}
+                                     for message in [*messages[:matching[0]], edited]], "runs": []}
 
 
 @router.patch("/api/conversations/{conversation_id}")
@@ -110,3 +172,18 @@ async def update_conversation(conversation_id: str, body: ConversationUpdate,
         conversation.updated_at = utcnow()
         await session.commit()
         return (await _summaries(session, [conversation]))[0]
+
+
+@router.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str, user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
+    async with ctx.sessions() as session:
+        conversation = await owned_conversation(session, user.id, conversation_id, "chat")
+        run_ids = list(await session.scalars(select(Run.id).where(
+            Run.conversation_id == conversation_id, Run.user_id == user.id)))
+    for run_id in run_ids:
+        await ctx.runs.delete(user.id, run_id)
+    async with ctx.sessions() as session:
+        conversation = await owned_conversation(session, user.id, conversation_id, "chat")
+        await session.delete(conversation)
+        await session.commit()
+    return {"ok": True, "id": conversation_id, "deleted_runs": len(run_ids)}

@@ -126,6 +126,11 @@ const conversation = (id, extra = {}) => ({
   ], runs: [{ id: 'old', status: 'done' }], ...extra,
 });
 
+test('a fresh workspace opens in Chat mode', () => {
+  const h = harness();
+  assert.equal(h.getState().currentMode, 'chat');
+});
+
 test('opening a completed conversation replaces the transcript, restores mode, and safely renders ordered messages', async () => {
   const h = harness();
   h.$('streamContainer').appendChild(new Element());

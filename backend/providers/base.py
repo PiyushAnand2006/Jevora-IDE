@@ -69,6 +69,7 @@ class ChatRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     stream: bool = False
+    web_search: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -83,6 +84,7 @@ class ChatResponse(BaseModel):
     latency_ms: float = 0.0
     attempts: int = 1
     fallback_used: bool = False
+    sources: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- errors

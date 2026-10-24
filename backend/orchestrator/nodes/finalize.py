@@ -108,11 +108,12 @@ async def finalize(o: Orchestrator, state: GraphState) -> dict[str, Any]:
         body = (state.get("worker_output") or state.get("plan") or "").strip()
         if state.get("command") == "/plan" and state.get("plan"):
             body = state["plan"].strip()
-        if state["mode"] == "research":
+        if state["mode"] in ("research", "chat") and (state.get("sources") or state.get("web_note")):
             note = state.get("web_note")
             if note and "web" not in body.lower()[:4000]:
                 body += f"\n\n_{note}_"
-            body += sources_footer(state.get("sources") or [])
+            if state.get("sources"):
+                body += sources_footer(state.get("sources") or [])
         if state.get("report_path"):
             body += f"\n\nFull report saved to `{state['report_path']}`."
         footer = _footer({**state, "verification": verification}, evidence, stats)
@@ -122,6 +123,18 @@ async def finalize(o: Orchestrator, state: GraphState) -> dict[str, Any]:
         elif status == "failed" and state.get("worker_error"):
             output = f"{output}\n\nRun failed: {state['worker_error']}"
     await _save_conversation(o, state, output)
+    async with o.app.sessions() as session:
+        run = await session.get(Run, rc.run_id)
+        if run is not None:
+            meta = dict(run.meta or {})
+            if state.get("sources"):
+                meta["sources"] = list(state["sources"])[:50]
+            if state.get("web_note"):
+                meta["web_note"] = state["web_note"]
+            if state.get("report_path"):
+                meta["report_path"] = state["report_path"]
+            run.meta = meta
+            await session.commit()
     if status == "done" and state["mode"] in ("build", "analysis", "research"):
         try:
             await o.app.memory.remember_workspace(rc.user_id, rc.workspace, f"run:{rc.run_id}",

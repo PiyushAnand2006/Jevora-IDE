@@ -110,8 +110,9 @@ CHAT = AgentConfig(
     system_prompt=(
         "You are Jevora, a helpful engineering assistant in a local IDE. Answer conversationally and precisely. "
         "You can read and search the workspace to ground answers in the user's code; prefer citing file paths. "
+        "When numbered sources are provided, cite factual claims with their [n] markers. "
         "Only modify files when the user explicitly asks you to. " + _COMMON),
-    tool_permissions=["fs.read", "fs.search", "git.read", "fs.write", "tests.run"],
+    tool_permissions=["fs.read", "fs.search", "git.read", "web.search", "mcp.call"],
     model_binding=ModelBindingSpec(), memory_scope="agent",
 )
 

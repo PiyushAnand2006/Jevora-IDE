@@ -117,7 +117,81 @@ class OpenAICompatAdapter(ProviderAdapter):
             body["stream_options"] = {"include_usage": True}
         return body
 
+    @staticmethod
+    def _responses_input(messages: list[ChatMessage]) -> tuple[str, list[dict[str, Any]]]:
+        instructions: list[str] = []
+        items: list[dict[str, Any]] = []
+        for message in messages:
+            if message.role == "system":
+                instructions.append(message.text())
+                continue
+            content: list[dict[str, Any]] = []
+            if isinstance(message.content, str):
+                content.append({"type": "input_text", "text": message.content})
+            else:
+                for part in message.content:
+                    if part.type == "text" and part.text:
+                        content.append({"type": "input_text", "text": part.text})
+                    elif part.type == "image" and part.image_b64:
+                        content.append({"type": "input_image", "image_url":
+                                        f"data:{part.mime or 'image/png'};base64,{part.image_b64}"})
+            if content:
+                role = "assistant" if message.role == "assistant" else "user"
+                items.append({"role": role, "content": content})
+        return "\n\n".join(p for p in instructions if p), items
+
+    async def _web_search(self, request: ChatRequest, on_delta: DeltaCallback | None = None) -> ChatResponse:
+        if self.kind != "openai":
+            raise ProviderError(f"{self.kind} provider does not expose native OpenAI web search")
+        started = time.perf_counter()
+        instructions, input_items = self._responses_input(request.messages)
+        body: dict[str, Any] = {
+            "model": request.model,
+            "input": input_items,
+            "tools": [{"type": "web_search_preview"}],
+        }
+        if instructions:
+            body["instructions"] = instructions
+        try:
+            response = await self.client.post(f"{self.api_base}/responses", json=body,
+                                              headers=self._headers(), timeout=self.timeout)
+        except Exception as exc:
+            raise wrap_transport_error(exc) from exc
+        if response.status_code >= 400:
+            raise classify_http_error(response)
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ProviderError("provider returned non-JSON web-search response", retryable=True) from exc
+        text_parts: list[str] = []
+        sources: list[dict[str, Any]] = []
+        for item in data.get("output", []) or []:
+            for block in item.get("content", []) or []:
+                if block.get("type") in ("output_text", "text"):
+                    text_parts.append(str(block.get("text") or ""))
+                    for annotation in block.get("annotations", []) or []:
+                        if annotation.get("type") != "url_citation":
+                            continue
+                        url = annotation.get("url") or ""
+                        if url:
+                            sources.append({"kind": "web", "title": annotation.get("title") or url,
+                                            "location": url, "excerpt": ""})
+        content = str(data.get("output_text") or "".join(text_parts))
+        usage_raw = data.get("usage") or {}
+        usage = Usage(prompt_tokens=int(usage_raw.get("input_tokens") or 0),
+                      completion_tokens=int(usage_raw.get("output_tokens") or 0))
+        if usage.total == 0:
+            usage = self._estimate_usage(request, content)
+        unique_sources = list({source["location"]: source for source in sources}.values())
+        if on_delta is not None and content:
+            await on_delta(content)
+        return ChatResponse(content=content, usage=usage, model=data.get("model") or request.model,
+                            finish_reason="stop", latency_ms=(time.perf_counter() - started) * 1000,
+                            sources=unique_sources)
+
     async def chat(self, request: ChatRequest, on_delta: DeltaCallback | None = None) -> ChatResponse:
+        if request.web_search:
+            return await self._web_search(request, on_delta)
         started = time.perf_counter()
         stream = request.stream and on_delta is not None
         body = self._body(request, stream)

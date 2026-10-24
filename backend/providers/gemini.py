@@ -129,7 +129,7 @@ class GeminiAdapter(ProviderAdapter):
                 break
         return sorted(dict.fromkeys(m for m in models if m))
 
-    def _body(self, request: ChatRequest) -> dict[str, Any]:
+    def _body(self, request: ChatRequest, web_tool: str = "googleSearch") -> dict[str, Any]:
         system, contents = to_gemini_contents(request.messages)
         body: dict[str, Any] = {"contents": contents}
         if system:
@@ -146,10 +146,15 @@ class GeminiAdapter(ProviderAdapter):
             generation["responseMimeType"] = "application/json"
         if generation:
             body["generationConfig"] = generation
+        tool_entries: list[dict[str, Any]] = []
+        if request.web_search:
+            tool_entries.append({web_tool: {}})
         if request.tools:
-            body["tools"] = [{"functionDeclarations": [
+            tool_entries.append({"functionDeclarations": [
                 {"name": t.name, "description": t.description, "parameters": sanitize_schema(t.parameters)}
-                for t in request.tools]}]
+                for t in request.tools]})
+        if tool_entries:
+            body["tools"] = tool_entries
         return body
 
     def _parse_candidate(self, data: dict[str, Any]) -> tuple[str, list[ToolCall], str | None]:
@@ -181,13 +186,19 @@ class GeminiAdapter(ProviderAdapter):
         started = time.perf_counter()
         body = self._body(request)
         model_path = _model_path(request.model)
-        if request.stream and on_delta is not None:
+        if request.stream and on_delta is not None and not request.web_search:
             return await self._stream(request, body, model_path, on_delta, started)
         try:
             response = await self.client.post(f"{self.base_url}/{model_path}:generateContent", json=body,
                                               headers=self._headers(), timeout=self.timeout)
         except Exception as exc:
             raise wrap_transport_error(exc) from exc
+        if response.status_code == 400 and request.web_search:
+            # Older Gemini models used the retrieval tool; retry once for those
+            # deployments while keeping the current generateContent spelling first.
+            body = self._body(request, web_tool="google_search_retrieval")
+            response = await self.client.post(f"{self.base_url}/{model_path}:generateContent", json=body,
+                                              headers=self._headers(), timeout=self.timeout)
         if response.status_code >= 400:
             raise classify_http_error(response)
         data = response.json()
@@ -195,8 +206,20 @@ class GeminiAdapter(ProviderAdapter):
         usage = self._usage(data)
         if usage.total == 0:
             usage = self._estimate_usage(request, content)
+        sources: list[dict[str, Any]] = []
+        grounding = ((data.get("candidates") or [{}])[0].get("groundingMetadata") or {})
+        for chunk in grounding.get("groundingChunks", []) or []:
+            web = chunk.get("web") or {}
+            url = web.get("uri") or web.get("url") or ""
+            if url:
+                sources.append({"kind": "web", "title": web.get("title") or url,
+                                "location": url, "excerpt": ""})
+        unique_sources = list({source["location"]: source for source in sources}.values())
+        if on_delta is not None and content:
+            await on_delta(content)
         return ChatResponse(content=content, tool_calls=calls, usage=usage, model=request.model,
-                            finish_reason=finish, latency_ms=(time.perf_counter() - started) * 1000)
+                            finish_reason=finish, latency_ms=(time.perf_counter() - started) * 1000,
+                            sources=unique_sources)
 
     async def _stream(self, request: ChatRequest, body: dict[str, Any], model_path: str,
                       on_delta: DeltaCallback, started: float) -> ChatResponse:

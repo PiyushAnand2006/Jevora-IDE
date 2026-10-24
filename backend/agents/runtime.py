@@ -86,6 +86,7 @@ class AgentResult:
     error: str | None = None
     steps: int = 0
     tool_calls: int = 0
+    sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 class AgentFailed(Exception):
@@ -136,13 +137,19 @@ class AgentRuntime:
 
     # ------------------------------------------------------------------ model selection
     async def bindings_for(self, rc: RunContext, config: AgentConfig, task: str,
-                           category: str | None) -> tuple[list[Binding], str]:
+                           category: str | None, web_search: bool = False) -> tuple[list[Binding], str]:
         router = self.app.router
+        requested_category = "research_retrieval" if web_search else (category or config.category or "code_generation")
         if rc.model_override and config.template != "screen-tester":
-            return await router.resolve(rc.user_id, rc.model_override, category or config.category), "explicit"
+            return await router.resolve(rc.user_id, rc.model_override, requested_category,
+                                        require_capability="web_search" if web_search else None), "explicit"
         if config.model_binding.mode == "explicit":
             return await router.resolve(rc.user_id, config.model_binding.spec(),
-                                        category or config.category), "explicit"
+                                        requested_category,
+                                        require_capability="web_search" if web_search else None), "explicit"
+        if web_search:
+            return await router.resolve(rc.user_id, "auto", requested_category,
+                                        require_capability="web_search"), requested_category
         chosen = category or config.category
         if chosen is None:
             chosen = await rc.route_fn(task, config.name) if rc.route_fn is not None else "code_generation"
@@ -180,7 +187,8 @@ class AgentRuntime:
     async def run_agent(self, rc: RunContext, config: AgentConfig, task: str, *, role: str | None = None,
                         parent: CallNode | None = None, context: str = "", category: str | None = None,
                         stream: bool = False, agent_id: str | None = None,
-                        history: list[ChatMessage] | None = None, include_images: bool = False) -> AgentResult:
+                        history: list[ChatMessage] | None = None, include_images: bool = False,
+                        web_search: bool = False) -> AgentResult:
         role = role or config.template or config.name
         depth = 0 if parent is None else parent.depth + 1
         call_id = await rc.recorder.start_call(
@@ -190,7 +198,7 @@ class AgentRuntime:
         node = CallNode(call_id=call_id, config=config, key=task_key(config, task), depth=depth, parent=parent)
         self.app.agent_pool.enter(rc.scope, node)
         body = asyncio.create_task(
-            self._run(rc, node, config, task, role, context, category, stream, history, include_images),
+            self._run(rc, node, config, task, role, context, category, stream, history, include_images, web_search),
             name=f"agent-{call_id}")
         node.task = body
         try:
@@ -203,12 +211,12 @@ class AgentRuntime:
 
     async def _run(self, rc: RunContext, node: CallNode, config: AgentConfig, task: str, role: str, context: str,
                    category: str | None, stream: bool, history: list[ChatMessage] | None,
-                   include_images: bool) -> AgentResult:
+                   include_images: bool, web_search: bool) -> AgentResult:
         with correlation(run_id=rc.run_id, call_id=node.call_id):
             result = AgentResult(call_id=node.call_id, status="running", output="")
             try:
                 await self._loop(rc, node, config, task, role, context, category, stream, history, include_images,
-                                 result)
+                                 result, web_search)
                 result.status = "done"
             except BudgetExceeded as exc:
                 result.status, result.error = "failed", exc.message
@@ -227,7 +235,7 @@ class AgentRuntime:
 
     async def _loop(self, rc: RunContext, node: CallNode, config: AgentConfig, task: str, role: str, context: str,
                     category: str | None, stream: bool, history: list[ChatMessage] | None, include_images: bool,
-                    result: AgentResult) -> None:
+                    result: AgentResult, web_search: bool) -> None:
         started = time.monotonic()
         try:
             sandbox_kind = (await self.app.sandboxes.status())["kind"] or "unavailable"
@@ -238,9 +246,13 @@ class AgentRuntime:
                                workspace=rc.workspace, guard=rc.guard, sandbox_factory=rc.sandbox,
                                extras={"runtime": self, "run_context": rc})
         tools = await self.tools.available(tool_ctx)
+        # Native provider web search is controlled by the run flag and does not
+        # need the legacy application-side search tool in the model's tool list.
+        if web_search:
+            tools = [tool for tool in tools if tool.name != "web_search"]
         specs = [t.spec() for t in tools]
         names = {t.name for t in tools}
-        bindings, chosen_category = await self.bindings_for(rc, config, task, category)
+        bindings, chosen_category = await self.bindings_for(rc, config, task, category, web_search=web_search)
         system = await self._system_prompt(rc, config, task, sandbox_kind)
         user_text = task if not context.strip() else f"{task}\n\n--- Context ---\n{context}"
         first: ChatMessage
@@ -291,7 +303,8 @@ class AgentRuntime:
                 response = await self.app.router.chat(
                     meta, convo, bindings=bindings, tools=None if text_mode else (specs or None), stream=stream,
                     on_delta=on_delta if stream else None, on_reset=on_reset, on_usage=on_usage,
-                    temperature=config.temperature)
+                    temperature=config.temperature,
+                    require_capability="web_search" if web_search and step == 0 else None)
             except ProviderError as exc:
                 if not text_mode and specs and exc.status == 400:
                     # Many local/OpenAI-compatible servers reject native tool calling with a 400.
@@ -303,6 +316,10 @@ class AgentRuntime:
                 await rc.recorder.set_call_model(node.call_id, response.model, response.provider_id)
                 result.model, result.provider_id = response.model, response.provider_id
                 model_recorded = True
+            for source in response.sources:
+                if source.get("location") and all(existing.get("location") != source["location"]
+                                                  for existing in result.sources):
+                    result.sources.append(source)
             calls = response.tool_calls
             if not calls and names:
                 calls = parse_inline_tool_calls(response.content, names)

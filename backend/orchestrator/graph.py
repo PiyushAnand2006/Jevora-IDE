@@ -243,7 +243,8 @@ class Orchestrator:
         return GraphState(
             run_id=run.id, user_id=run.user_id, mode=run.mode, task=run.task, command=run.command,
             command_arg=run.task, agent_id=run.agent_id, model_override=run.model_override,
-            conversation_id=run.conversation_id, attachments=list(run.attachments or []), flags=flags,
+            conversation_id=run.conversation_id, attachments=list(run.attachments or []),
+            web_search=bool((run.meta or {}).get("web_search", False) or run.mode == "research"), flags=flags,
             iteration=0, max_iterations=self.app.settings.iteration_ceiling, same_agent_failures=0,
             worker_attempts=0, evidence=[], files_changed=[], escalation=None)
 

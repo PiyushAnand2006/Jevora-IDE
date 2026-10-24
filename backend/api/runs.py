@@ -26,6 +26,7 @@ class RunCreate(BaseModel):
     text: str = Field(default="", max_length=2_000_000)
     mode: str = "build"
     model: str | None = None
+    web_search: bool = False
     attachments: list[str] = Field(default_factory=list, max_length=50)
     agent_id: str | None = None
     conversation_id: str | None = None

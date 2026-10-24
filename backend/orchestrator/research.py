@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 from backend.agents.tools.search import WebSearchUnavailable
 from backend.core.logging import get_logger
 from backend.decision.schemas import CitationsPayload
+from backend.providers.base import ChatMessage, ProviderError
+from backend.providers.router import CallMeta
 
 if TYPE_CHECKING:
     from backend.agents.runtime import RunContext
@@ -29,7 +31,8 @@ class Source:
 
 
 async def gather_sources(rc: RunContext, query: str, attachments: list[dict[str, Any]],
-                         web_k: int = 5, workspace_k: int = 5) -> tuple[list[Source], str | None]:
+                         web_k: int = 5, workspace_k: int = 5, use_native: bool = True
+                         ) -> tuple[list[Source], str | None]:
     """Returns (sources, web_note). ``web_note`` explains why browsing was not possible, if it wasn't."""
     sources: list[Source] = []
     for att in attachments:
@@ -44,15 +47,34 @@ async def gather_sources(rc: RunContext, query: str, attachments: list[dict[str,
         log.warning("workspace retrieval failed", exc_info=True)
     web_note: str | None = None
     service = rc.app.web_search
-    if service.enabled:
+    if use_native:
+        try:
+            response = await rc.app.router.chat(
+                CallMeta(user_id=rc.user_id, run_id=rc.run_id, category="research_retrieval"),
+                [ChatMessage(role="user", content=query)], model=rc.model_override or "auto",
+                category="research_retrieval", require_capability="web_search", stream=False)
+            for result in response.sources:
+                sources.append(Source("web", result.get("title") or result.get("location", ""),
+                                      result.get("location") or result.get("url", ""),
+                                      result.get("excerpt", "")))
+            if response.sources:
+                return sources, None
+            web_note = "The selected provider returned no web citations for this query."
+        except ProviderError as exc:
+            web_note = str(exc)
+    if service.enabled and service.status()["configured"]:
         try:
             for result in await service.search(query, web_k):
                 sources.append(Source("web", result.title or result.url, result.url, result.snippet))
+            if web_note:
+                web_note = "Using the configured Jevora Browser fallback because native provider web search " \
+                           "was unavailable."
         except WebSearchUnavailable as exc:
             web_note = f"Web search failed: {exc}. The report uses attachments, workspace files and model knowledge."
     else:
-        web_note = ("Web browsing is not available in this session (web search is disabled), so this report relies "
-                    "on attached files, the workspace and the model's own knowledge.")
+        web_note = ("Web browsing is not available in this session, so this report relies on attached files, the "
+                    "workspace and the model's own knowledge." if not web_note else
+                    f"Web browsing is not available for the selected model: {web_note}")
     return sources, web_note
 
 

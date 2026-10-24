@@ -42,6 +42,42 @@ async def test_creation_is_committed_before_scheduling(harness: AppHarness, monk
     assert [(m["role"], m["content"]) for m in detail["messages"]] == [("user", "Remember my project")]
 
 
+async def test_chat_web_search_flag_is_persisted(harness: AppHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(harness.ctx.executor, "submit", Mock())
+    response = await harness.client.post("/api/runs", json={
+        "mode": "chat", "text": "Find current docs", "web_search": True})
+    assert response.status_code == 201, response.text
+    run = (await harness.client.get(f"/api/runs/{response.json()['id']}")).json()
+    assert run["meta"]["web_search"] is True
+
+
+async def test_conversation_can_branch_and_delete(harness: AppHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(harness.ctx.executor, "submit", Mock())
+    first = (await harness.client.post("/api/runs", json={"mode": "chat", "text": "First"})).json()
+    detail = (await harness.client.get(f"/api/conversations/{first['conversation_id']}")).json()
+    branch = await harness.client.post(f"/api/conversations/{first['conversation_id']}/branch", json={
+        "message_id": detail["messages"][0]["id"]})
+    assert branch.status_code == 201, branch.text
+    assert branch.json()["id"] != first["conversation_id"]
+    assert [m["content"] for m in branch.json()["messages"]] == ["First"]
+
+    deleted = await harness.client.delete(f"/api/conversations/{first['conversation_id']}")
+    assert deleted.status_code == 200 and deleted.json()["deleted_runs"] == 1
+    assert (await harness.client.get(f"/api/conversations/{first['conversation_id']}")).status_code == 404
+
+
+async def test_editing_a_user_message_creates_a_new_branch(
+        harness: AppHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(harness.ctx.executor, "submit", Mock())
+    first = (await harness.client.post("/api/runs", json={"mode": "chat", "text": "Original"})).json()
+    detail = (await harness.client.get(f"/api/conversations/{first['conversation_id']}")).json()
+    edited = await harness.client.post(f"/api/conversations/{first['conversation_id']}/edit", json={
+        "message_id": detail["messages"][0]["id"], "content": "Corrected"})
+    assert edited.status_code == 201, edited.text
+    assert edited.json()["id"] != first["conversation_id"]
+    assert [m["content"] for m in edited.json()["messages"]] == ["Corrected"]
+
+
 async def test_creation_continuation_and_ordered_history(harness: AppHarness, mock_llm: MockLLM) -> None:
     await add_mock_provider(harness.client, mock_llm)
     brain = Brain().install(mock_llm)

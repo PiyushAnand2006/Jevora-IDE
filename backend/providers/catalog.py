@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 ProviderKind = Literal["openai", "google", "anthropic", "custom", "local"]
 PROVIDER_KINDS: tuple[str, ...] = ("openai", "google", "anthropic", "custom", "local")
+NATIVE_WEB_SEARCH_KINDS: frozenset[str] = frozenset({"openai", "google", "anthropic"})
 
 Category = Literal[
     "heavy_reasoning", "fast_classification", "code_generation", "creative_ui", "research_retrieval",
@@ -117,6 +118,8 @@ def infer_capabilities(model: str, kind: str) -> dict[str, Any]:
         "json": tier != "embedding",
         "context_len": context,
         "computer_use": tier == "computer_use",
+        "web_search": kind in NATIVE_WEB_SEARCH_KINDS and tier != "embedding",
+        "web_search_mode": "native" if kind in NATIVE_WEB_SEARCH_KINDS and tier != "embedding" else None,
     }
 
 

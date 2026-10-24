@@ -109,9 +109,12 @@ class AnthropicAdapter(ProviderAdapter):
             body["system"] = system
         if request.temperature is not None:
             body["temperature"] = request.temperature
-        tools = [{"name": t.name, "description": t.description, "input_schema": t.parameters}
-                 for t in request.tools]
-        if request.json_schema is not None and not request.tools:
+        tools: list[dict[str, Any]] = []
+        if request.web_search:
+            tools.append({"type": "web_search_20250305", "name": "web_search", "max_uses": 5})
+        tools.extend({"name": t.name, "description": t.description, "input_schema": t.parameters}
+                     for t in request.tools)
+        if request.json_schema is not None and not request.tools and not request.web_search:
             # Anthropic has no response_format: force a single tool whose input is the JSON.
             tools.append({"name": JSON_TOOL, "description": "Return the answer as structured JSON.",
                           "input_schema": request.json_schema})
@@ -124,7 +127,7 @@ class AnthropicAdapter(ProviderAdapter):
 
     async def chat(self, request: ChatRequest, on_delta: DeltaCallback | None = None) -> ChatResponse:
         started = time.perf_counter()
-        stream = request.stream and on_delta is not None and request.json_schema is None
+        stream = request.stream and on_delta is not None and request.json_schema is None and not request.web_search
         body = self._body(request, stream)
         url = f"{self.base_url}/messages"
         if stream:
@@ -138,9 +141,23 @@ class AnthropicAdapter(ProviderAdapter):
         data = response.json()
         text_parts: list[str] = []
         calls: list[ToolCall] = []
+        sources: list[dict[str, Any]] = []
         for block in data.get("content", []):
             if block.get("type") == "text":
                 text_parts.append(block.get("text", ""))
+                for citation in block.get("citations", []) or []:
+                    url = citation.get("url") or citation.get("source") or ""
+                    if url:
+                        sources.append({"kind": "web", "title": citation.get("title") or url,
+                                        "location": url, "excerpt": citation.get("cited_text") or ""})
+            elif block.get("type") == "web_search_tool_result":
+                for result in block.get("content", []) or []:
+                    if result.get("type") != "web_search_result":
+                        continue
+                    url = result.get("url") or ""
+                    if url:
+                        sources.append({"kind": "web", "title": result.get("title") or url,
+                                        "location": url, "excerpt": result.get("snippet") or ""})
             elif block.get("type") == "tool_use":
                 if block.get("name") == JSON_TOOL:
                     text_parts.append(json.dumps(block.get("input") or {}))
@@ -153,9 +170,10 @@ class AnthropicAdapter(ProviderAdapter):
                       completion_tokens=int(usage_raw.get("output_tokens") or 0))
         if usage.total == 0:
             usage = self._estimate_usage(request, content)
+        unique_sources = list({source["location"]: source for source in sources}.values())
         return ChatResponse(content=content, tool_calls=calls, usage=usage,
                             model=data.get("model", request.model), finish_reason=data.get("stop_reason"),
-                            latency_ms=(time.perf_counter() - started) * 1000)
+                            latency_ms=(time.perf_counter() - started) * 1000, sources=unique_sources)
 
     async def _stream(self, request: ChatRequest, body: dict[str, Any], url: str,
                       on_delta: DeltaCallback | None, started: float) -> ChatResponse:

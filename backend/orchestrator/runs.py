@@ -67,7 +67,8 @@ class RunService:
         return await self.create(user_id, text=text, mode=mode, model=body.get("model"),
                                  attachments=body.get("attachments") or [], agent_id=body.get("agent_id"),
                                  conversation_id=body.get("conversation_id"),
-                                 workspace_id=body.get("workspace_id"), command=command)
+                                 workspace_id=body.get("workspace_id"), command=command,
+                                 meta={**(body.get("meta") or {}), "web_search": bool(body.get("web_search", False))})
 
     async def create(self, user_id: str, *, text: str, mode: str, model: str | None = None,
                      attachments: list[str] | None = None, agent_id: str | None = None,

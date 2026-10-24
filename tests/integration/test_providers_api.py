@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 from sqlalchemy import select
 
-from backend.db.models import Provider
+from backend.db.models import ModelBinding, Provider
 from tests.conftest import AppHarness, add_mock_provider
 from tests.support.servers import MockLLM
 
@@ -134,3 +134,26 @@ async def test_model_catalogue_and_router_config(client: httpx.AsyncClient, mock
     await client.delete(f"/api/providers/{provider['id']}")
     config = (await client.get("/api/router/config")).json()
     assert config["overrides"] == {}
+
+
+async def test_web_search_status_uses_saved_provider_capabilities(harness: AppHarness,
+                                                                  mock_llm: MockLLM) -> None:
+    custom = await add_mock_provider(harness.client, mock_llm)
+    unavailable = (await harness.client.get("/api/web-search/status",
+                                            params={"model": f"{custom['id']}:mock-pro"})).json()
+    assert unavailable["available"] is False
+    assert "does not support native web search" in unavailable["reason"]
+
+    openai = (await harness.client.post("/api/providers", json={
+        "name": "OpenAI", "base_url": "https://api.openai.com/v1", "api_key": "sk-test",
+        "kind": "custom"})).json()
+    async with harness.ctx.sessions() as session:
+        session.add(ModelBinding(provider_id=openai["id"], model="gpt-4o", tier="balanced"))
+        await session.commit()
+    available = (await harness.client.get("/api/web-search/status",
+                                          params={"model": f"{openai['id']}:gpt-4o"})).json()
+    assert available["available"] is True and available["mode"] == "native"
+    assert available["binding"]["provider_id"] == openai["id"]
+    automatic = (await harness.client.get("/api/web-search/status")).json()
+    assert automatic["available"] is True and automatic["mode"] == "native"
+    assert automatic["binding"]["provider_id"] == openai["id"]

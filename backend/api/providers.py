@@ -92,6 +92,18 @@ async def model_catalogue(user: CurrentUser, ctx: Ctx, refresh: bool = Query(Fal
     }
 
 
+@router.get("/api/web-search/status")
+async def web_search_status(user: CurrentUser, ctx: Ctx, model: str | None = Query(None)) -> dict[str, Any]:
+    status = await ctx.router.web_search_status(user.id, model)
+    fallback = ctx.web_search.status()
+    if not status["available"] and fallback["enabled"] and fallback["configured"]:
+        status.update({"available": True, "mode": "jevora", "reason": None,
+                       "fallback": {"provider": fallback["provider"]}})
+    else:
+        status["fallback"] = {"provider": fallback["provider"], "configured": fallback["configured"]}
+    return status
+
+
 class RouterConfigBody(BaseModel):
     mapping: dict[str, list[dict[str, str]]] = Field(default_factory=dict)
 

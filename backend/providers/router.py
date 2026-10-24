@@ -92,7 +92,15 @@ RetryCallback = Callable[[Binding, int, ProviderError, float], Awaitable[None]]
 
 def _binding(provider: Provider, mb: ModelBinding | None, model: str, source: str) -> Binding:
     tier = mb.tier if mb is not None else infer_tier(model)
-    caps = dict(mb.capabilities) if mb is not None else infer_capabilities(model, provider.kind)
+    inferred = infer_capabilities(model, provider.kind)
+    caps = dict(inferred)
+    if mb is not None:
+        caps.update(mb.capabilities or {})
+    # Native browsing is an adapter capability, not a user-editable model flag.
+    # This prevents stale or manually copied JSON from making custom/local models
+    # appear browser-capable when their endpoint only supports chat completions.
+    caps["web_search"] = inferred["web_search"]
+    caps["web_search_mode"] = inferred["web_search_mode"]
     return Binding(provider_id=provider.id, provider_name=provider.name, kind=provider.kind, model=model,
                    tier=tier, capabilities=caps, source=source)
 
@@ -210,20 +218,68 @@ class ProviderRouter:
         return await self.get_config(user_id)
 
     # ------------------------------------------------------------------ resolution
-    async def resolve(self, user_id: str, model_spec: str | None, category: str | None = None) -> list[Binding]:
+    async def resolve(self, user_id: str, model_spec: str | None, category: str | None = None,
+                      require_capability: str | None = None) -> list[Binding]:
         category = category or "code_generation"
         effective = await self.effective_mapping(user_id)
         auto_chain = effective.get(category, [])
         spec = (model_spec or "auto").strip()
         if spec.lower() == "auto":
+            if require_capability:
+                auto_chain = [b for b in auto_chain if b.capabilities.get(require_capability)]
             if not auto_chain:
+                if require_capability == "web_search":
+                    raise NoProviderConfigured(
+                        "No configured model supports native web search. Select OpenAI, Google, or Anthropic "
+                        "with a web-capable model, or configure the Jevora Browser fallback.")
                 raise NoProviderConfigured(
                     "No model provider is configured. Add a provider (or start Ollama locally) and try again.")
             return auto_chain
 
         explicit = await self._resolve_explicit(user_id, spec)
+        if require_capability and not explicit.capabilities.get(require_capability):
+            if require_capability == "web_search":
+                raise ProviderUnavailable(
+                    f"Selected model '{explicit.model}' from {explicit.provider_name} does not support native "
+                    "web search.")
+            raise ProviderUnavailable(f"Selected model '{explicit.model}' lacks capability '{require_capability}'.")
+        if require_capability:
+            auto_chain = [b for b in auto_chain if b.capabilities.get(require_capability)]
         chain = [explicit, *[b for b in auto_chain if b.ref != explicit.ref]]
         return chain
+
+    async def web_search_status(self, user_id: str, model_spec: str | None = None) -> dict[str, Any]:
+        """Report whether the requested saved model can perform native web search."""
+        spec = (model_spec or "auto").strip() or "auto"
+        try:
+            chain = await self.resolve(user_id, spec, "research_retrieval", require_capability="web_search")
+        except ProviderError as exc:
+            candidates = [
+                _binding(provider, binding, binding.model, "capability")
+                for provider, binding in await self.service.bindings(user_id)
+                if infer_capabilities(binding.model, provider.kind).get("web_search")
+            ]
+            return {
+                "requested_model": spec,
+                "available": False,
+                "mode": "none",
+                "binding": None,
+                "candidates": [b.public() for b in candidates],
+                "reason": str(exc),
+            }
+        candidates = [
+            _binding(provider, binding, binding.model, "capability")
+            for provider, binding in await self.service.bindings(user_id)
+            if infer_capabilities(binding.model, provider.kind).get("web_search")
+        ]
+        return {
+            "requested_model": spec,
+            "available": True,
+            "mode": "native",
+            "binding": chain[0].public(),
+            "candidates": [b.public() for b in candidates],
+            "reason": None,
+        }
 
     async def _resolve_explicit(self, user_id: str, spec: str) -> Binding:
         providers = await self.service.list_for(user_id)
@@ -317,10 +373,18 @@ class ProviderRouter:
         on_retry: RetryCallback | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        require_capability: str | None = None,
     ) -> ChatResponse:
         if category:
             meta.category = category
-        chain = bindings if bindings is not None else await self.resolve(meta.user_id, model, category)
+        chain = bindings if bindings is not None else await self.resolve(
+            meta.user_id, model, category, require_capability=require_capability)
+        if require_capability:
+            chain = [binding for binding in chain if binding.capabilities.get(require_capability)]
+            if not chain:
+                if require_capability == "web_search":
+                    raise ProviderUnavailable("No selected provider binding supports native web search.")
+                raise ProviderUnavailable(f"No selected provider binding supports '{require_capability}'.")
         if not chain:
             raise NoProviderConfigured("No model provider is configured.")
         wants_vision = any(m.has_images() for m in messages)
@@ -337,7 +401,8 @@ class ProviderRouter:
             payload = messages if (not wants_vision or binding.capabilities.get("vision")) else strip_images(messages)
             request = ChatRequest(model=binding.model, messages=payload, tools=tools or [],
                                   json_schema=json_schema, json_mode=json_mode, stream=stream,
-                                  temperature=temperature, max_tokens=max_tokens)
+                                  temperature=temperature, max_tokens=max_tokens,
+                                  web_search=require_capability == "web_search")
             breaker = self.breakers.get(binding.provider_id)
             started = time.perf_counter()
 

@@ -68,6 +68,7 @@ async def system_health(user: CurrentUser, ctx: Ctx, probe: bool = Query(True)) 
 async def features(ctx: Ctx) -> dict[str, Any]:
     flags: dict[str, Any] = {
         "web_search": ctx.settings.web_search_enabled,
+        "web_search_configured": ctx.web_search.status()["configured"],
         "web_search_provider": ctx.settings.web_search_provider if ctx.settings.web_search_enabled else None,
         "auth_required": ctx.settings.auth_required,
         "oauth": ctx.settings.oauth_configured,

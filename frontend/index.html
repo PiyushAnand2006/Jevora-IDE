@@ -109,18 +109,18 @@
           <div class="panel-header-bar">
             <div class="mode-dropdown-wrapper" id="modeDropdownWrapper">
               <button class="mode-dropdown-btn" id="modeDropdownBtn" type="button" aria-haspopup="listbox" aria-expanded="false" title="Workflow Mode">
-                <span class="mode-dropdown-label" id="modeDropdownLabel">Build</span>
+                <span class="mode-dropdown-label" id="modeDropdownLabel">Chat</span>
                 <svg class="mode-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="6 9 12 15 18 9"></polyline>
                 </svg>
               </button>
 
               <div class="mode-dropdown-menu" id="modeDropdownMenu" role="listbox">
-                <button class="mode-dropdown-item active" data-mode="build" type="button" role="option">
+                <button class="mode-dropdown-item" data-mode="build" type="button" role="option">
                   <span class="mode-item-dot dot-build"></span>
                   <span class="mode-item-title">Build</span>
                 </button>
-                <button class="mode-dropdown-item" data-mode="chat" type="button" role="option">
+                <button class="mode-dropdown-item active" data-mode="chat" type="button" role="option">
                   <span class="mode-item-dot dot-chat"></span>
                   <span class="mode-item-title">Chat</span>
                 </button>
@@ -168,15 +168,20 @@
 
             <!-- Centered Greeting Block (z.ai style) -->
             <div class="central-chat-hero" id="centralChatHero">
-              <h1 class="greeting-heading" id="greetingHeading">What can I build for you?</h1>
-              <p class="greeting-subtitle" id="greetingSubtitle">Interact with Jevora IDE and explore the boundless creative world</p>
+              <h1 class="greeting-heading" id="greetingHeading">What can I help you with?</h1>
+              <p class="greeting-subtitle" id="greetingSubtitle">Ask questions, share files, search the web, or switch modes when you want deeper work.</p>
             </div>
 
             <!-- Input Container (Smoothly animates from center to bottom) -->
             <div class="input-row-container" id="inputRowContainer">
               <div class="conversation-context" id="conversationContext" hidden>
                 <div class="conversation-context-copy"><strong id="conversationTitle"></strong><span id="conversationHint">Your conversation is ready to continue.</span></div>
-                <button class="continue-conversation-btn" id="continueConversationBtn" type="button">Continue conversation <span aria-hidden="true">↗</span></button>
+                <div class="conversation-actions">
+                  <button class="conversation-action-btn" id="conversationRenameBtn" type="button" title="Rename conversation">Rename</button>
+                  <button class="conversation-action-btn" id="conversationBranchBtn" type="button" title="Branch conversation">Branch</button>
+                  <button class="conversation-action-btn danger" id="conversationDeleteBtn" type="button" title="Delete conversation">Delete</button>
+                  <button class="continue-conversation-btn" id="continueConversationBtn" type="button">Continue <span aria-hidden="true">↗</span></button>
+                </div>
               </div>
               <div class="input-card-box">
                 <div class="input-field-wrapper">
@@ -203,10 +208,10 @@
                           <span class="menu-dot"></span>
                           <span class="menu-label">Photos</span>
                         </button>
-                        <div class="attach-menu-item disabled" id="webSearchMenuItem" data-action="websearch" title="Web search is not available yet" aria-disabled="true">
-                          <span class="menu-dot disabled-dot"></span>
-                          <span class="menu-label struck">Web search</span>
-                        </div>
+                        <button class="attach-menu-item" id="webSearchMenuItem" data-action="websearch" type="button">
+                          <span class="menu-dot"></span>
+                          <span class="menu-label">Web search</span>
+                        </button>
                         <button class="attach-menu-item" data-action="commands" type="button">
                           <span class="menu-prefix">/</span>
                           <span class="menu-label">Commands</span>
@@ -470,6 +475,6 @@
 
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

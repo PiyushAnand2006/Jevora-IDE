@@ -1,4 +1,9 @@
-"""Web search behind ``WEB_SEARCH_ENABLED`` (Tavily, Brave or SearXNG) + the agent tool."""
+"""Optional Jevora Browser fallback (Tavily, Brave or SearXNG) and its tool.
+
+Native provider web search is handled by the provider adapters; this service is
+kept for custom/local models and deployments that explicitly configure a
+server-side search backend.
+"""
 
 from __future__ import annotations
 

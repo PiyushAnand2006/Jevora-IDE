@@ -165,10 +165,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const drawerBody = $('drawerBody');
   const drawerCloseBtn = $('drawerCloseBtn');
   const commandPopover = $('commandPopover');
+  const webSearchToggleBtn = $('webSearchToggleBtn');
+  const conversationRenameBtn = $('conversationRenameBtn');
+  const conversationBranchBtn = $('conversationBranchBtn');
+  const conversationDeleteBtn = $('conversationDeleteBtn');
 
-  let currentMode = 'build';
+  let currentMode = 'chat';
   let activeTab = 'build';
   let activeAttachments = []; // { id, filename, kind, uploading }
+  let webSearchEnabled = false;
+  let webSearchStatus = { available: false, mode: 'none', reason: 'Select a configured model first.' };
   let isSidebarOpen = true;
   let conversationId = null;
   let selectedAgent = null; // { id, name }
@@ -183,6 +189,29 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeConversationTitle = '';
   const activeRunViews = new Set();
 
+  const MODE_COPY = {
+    chat: {
+      title: 'What can I help you with?',
+      subtitle: 'Ask questions, share files, search the web, or switch modes when you want deeper work.',
+      placeholder: 'Ask anything about your project or idea…',
+    },
+    build: {
+      title: 'What should we build?',
+      subtitle: 'Plan, edit, test, and ship changes in your workspace.',
+      placeholder: 'Describe what you want to build…',
+    },
+    research: {
+      title: 'What should we research?',
+      subtitle: 'Gather sources from the web, files, and your workspace into a cited report.',
+      placeholder: 'Research a topic or question…',
+    },
+    analysis: {
+      title: 'What should we analyze?',
+      subtitle: 'Inspect your workspace or uploaded data for structure, risks, and insights.',
+      placeholder: 'Describe the analysis you need…',
+    },
+  };
+
   // localStorage already scopes by origin; additionally isolate accounts and workspaces.
   function conversationStorageKey() {
     return `jevora_active_conversation:${currentUser?.id || 'local'}:${window.location.pathname}`;
@@ -192,6 +221,39 @@ document.addEventListener('DOMContentLoaded', () => {
     // Local mode keeps the legacy preview key; authenticated users get an
     // account-specific browser cache so one user's providers never appear for another.
     return currentUser && !currentUser.is_local ? `jevora_providers:${currentUser.id}` : 'jevora_providers';
+  }
+
+  function webSearchStorageKey() {
+    return `jevora_web_search:${currentUser?.id || 'local'}`;
+  }
+
+  function renderWebSearchState() {
+    if (!webSearchToggleBtn) return;
+    const available = Boolean(webSearchStatus.available);
+    webSearchToggleBtn.classList.toggle('active', webSearchEnabled);
+    webSearchToggleBtn.classList.toggle('unavailable', !available);
+    webSearchToggleBtn.setAttribute('aria-pressed', String(webSearchEnabled));
+    webSearchToggleBtn.title = !available ? (webSearchStatus.reason || 'Web search is unavailable for this model')
+      : (webSearchEnabled ? 'Web search on' : 'Search the web');
+    webSearchToggleBtn.setAttribute('aria-label', webSearchToggleBtn.title);
+  }
+
+  function setWebSearchEnabled(enabled) {
+    webSearchEnabled = Boolean(enabled);
+    try {
+      if (webSearchEnabled) localStorage.setItem(webSearchStorageKey(), '1');
+      else localStorage.removeItem(webSearchStorageKey());
+    } catch (_) { /* Private browsing can disable persistence. */ }
+    renderWebSearchState();
+  }
+
+  function applyModeSurface() {
+    const copy = MODE_COPY[currentMode] || MODE_COPY.chat;
+    if (greetingHeading) greetingHeading.textContent = copy.title;
+    if (greetingSubtitle) greetingSubtitle.textContent = copy.subtitle;
+    if (agentInput && !conversationLoading && !runStarting) {
+      agentInput.placeholder = selectedAgent && activeTab === 'build' ? `Message ${selectedAgent.name}...` : copy.placeholder;
+    }
   }
 
   function setConversationId(id) {
@@ -212,6 +274,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if ($('conversationTitle')) $('conversationTitle').textContent = activeConversationTitle || 'Conversation';
     if ($('conversationHint')) $('conversationHint').textContent = busy ? 'An agent is working on this conversation.' : 'Your conversation is ready to continue.';
     if ($('continueConversationBtn')) $('continueConversationBtn').disabled = busy;
+    if (conversationRenameBtn) conversationRenameBtn.disabled = busy;
+    if (conversationBranchBtn) conversationBranchBtn.disabled = busy;
+    if (conversationDeleteBtn) conversationDeleteBtn.disabled = busy;
+    if (conversationRenameBtn) conversationRenameBtn.hidden = !conversationId;
+    if (conversationBranchBtn) conversationBranchBtn.hidden = !conversationId;
+    if (conversationDeleteBtn) conversationDeleteBtn.hidden = !conversationId;
     document.querySelectorAll('[data-conversation-id]').forEach((row) => {
       const selected = row.dataset.conversationId === conversationId;
       row.classList.toggle('selected', selected);
@@ -220,6 +288,41 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   $('continueConversationBtn')?.addEventListener('click', () => { agentInput.focus(); });
+
+  conversationRenameBtn?.addEventListener('click', async () => {
+    if (!conversationId || conversationRenameBtn.disabled) return;
+    const next = window.prompt('Conversation name', activeConversationTitle || 'Conversation');
+    if (next === null) return;
+    const title = next.trim();
+    if (!title) { showToast('Conversation name cannot be empty'); return; }
+    try {
+      const updated = await api.patch(`/api/conversations/${encodeURIComponent(conversationId)}`, { title });
+      activeConversationTitle = updated.title || title;
+      updateConversationComposer();
+      refreshConversationLists();
+    } catch (error) { showToast(`Rename failed: ${error.message}`); }
+  });
+
+  conversationBranchBtn?.addEventListener('click', async () => {
+    if (!conversationId || conversationBranchBtn.disabled) return;
+    try {
+      const branch = await api.post(`/api/conversations/${encodeURIComponent(conversationId)}/branch`, {});
+      showToast('Conversation branch created');
+      await openConversation(branch.id);
+      refreshConversationLists();
+    } catch (error) { showToast(`Branch failed: ${error.message}`); }
+  });
+
+  conversationDeleteBtn?.addEventListener('click', async () => {
+    if (!conversationId || conversationDeleteBtn.disabled) return;
+    if (!window.confirm('Delete this conversation and its saved runs?')) return;
+    const id = conversationId;
+    try {
+      await api.del(`/api/conversations/${encodeURIComponent(id)}`);
+      resetConversation('Conversation deleted');
+      refreshConversationLists();
+    } catch (error) { showToast(`Delete failed: ${error.message}`); }
+  });
 
   function beginConversationSession(clearStored = true) {
     sessionRevision += 1;
@@ -326,9 +429,7 @@ document.addEventListener('DOMContentLoaded', () => {
         leftTabBuild.classList.add('active');
         leftTabAgent.classList.remove('active');
         if (modeDropdownWrapperEl) modeDropdownWrapperEl.style.display = '';
-        if (greetingHeading) greetingHeading.textContent = 'What can I build for you?';
-        if (greetingSubtitle) greetingSubtitle.textContent = 'Interact with Jevora IDE and explore the boundless creative world';
-        if (agentInput) agentInput.placeholder = selectedAgent ? `Message ${selectedAgent.name}...` : 'How can I help you today?';
+        applyModeSurface();
       } else {
         leftTabAgent.classList.add('active');
         leftTabBuild.classList.remove('active');
@@ -381,13 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modeDropdownBtn.classList.remove('open');
         modeDropdownBtn.setAttribute('aria-expanded', 'false');
         showToast(`Switched to ${modeTitle} mode`);
-        const placeholders = {
-          build: 'Message your agent (e.g. Build a full-stack dashboard)...',
-          chat: 'Chat with agent...',
-          research: 'Search, summarize and research any topic...',
-          analysis: 'Provide files or repository for deep analysis...',
-        };
-        if (agentInput) agentInput.placeholder = placeholders[currentMode] || agentInput.placeholder;
+        applyModeSurface();
       });
     });
   }
@@ -442,21 +537,28 @@ document.addEventListener('DOMContentLoaded', () => {
   attachMenu?.querySelectorAll('.attach-menu-item').forEach((item) => {
     item.addEventListener('click', () => {
       const action = item.dataset.action;
-      if (item.classList.contains('disabled')) { showToast('Web search is not available yet'); return; }
       attachMenu.classList.remove('open');
       if (action === 'files') pickFiles('', true);
       else if (action === 'photos') pickFiles('image/*', true);
       else if (action === 'commands') openCommandPopover();
       else if (action === 'websearch') {
-        if (currentMode !== 'research') document.querySelector('.mode-dropdown-item[data-mode="research"]')?.click();
-        showToast('Web search is enabled for Research mode');
+        if (!webSearchStatus.available) {
+          showToast(webSearchStatus.reason || 'Web search is unavailable for the selected model');
+          return;
+        }
+        setWebSearchEnabled(!webSearchEnabled);
+        showToast(webSearchEnabled ? 'Web search enabled for Chat' : 'Web search disabled');
       }
     });
   });
 
-  $('webSearchToggleBtn')?.addEventListener('click', () => {
-    if (!features.web_search) { showToast('Web search is not available yet'); return; }
-    document.querySelector('.mode-dropdown-item[data-mode="research"]')?.click();
+  webSearchToggleBtn?.addEventListener('click', () => {
+    if (!webSearchStatus.available) {
+      showToast(webSearchStatus.reason || 'Web search is unavailable for the selected model');
+      return;
+    }
+    setWebSearchEnabled(!webSearchEnabled);
+    showToast(webSearchEnabled ? 'Web search enabled for Chat' : 'Web search disabled');
   });
 
   let commandsCache = null;
@@ -512,15 +614,78 @@ document.addEventListener('DOMContentLoaded', () => {
     if (streamContainer) streamContainer.style.display = 'flex';
   }
 
-  function appendUserBubble(text, attachments) {
+  function appendUserBubble(text, attachments, { messageId = null } = {}) {
     ensureChatStage();
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble user';
     const attachmentMarkup = attachments.length
       ? `<div style="font-size:12px;opacity:0.9;margin-bottom:4px;">Attachments: ${attachments.map((a) => escapeHtml(a.filename)).join(', ')}</div>` : '';
-    bubble.innerHTML = `<div class="bubble-content">${attachmentMarkup}<div>${escapeHtml(text || 'Attached context')}</div></div>`;
+    bubble.innerHTML = `<div class="bubble-content">${attachmentMarkup}<div>${escapeHtml(text || 'Attached context')}</div>${messageId ? '<div class="message-actions"><button type="button" class="message-action-btn" data-action="edit">Edit</button></div>' : ''}</div>`;
+    if (messageId) {
+      bubble.querySelector('[data-action="edit"]')?.addEventListener('click', async () => {
+        const next = window.prompt('Edit message', text);
+        if (next === null || !next.trim()) return;
+        try {
+          const edited = await api.post(`/api/conversations/${encodeURIComponent(conversationId)}/edit`, {
+            message_id: messageId, content: next.trim(),
+          });
+          await openConversation(edited.id);
+          showToast('Edited message moved to a new branch');
+          refreshConversationLists();
+        } catch (error) { showToast(`Edit failed: ${error.message}`); }
+      });
+    }
     streamContainer.appendChild(bubble);
     scrollMessagesToBottom();
+  }
+
+  async function copyText(text) {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select?.();
+        document.execCommand?.('copy');
+        textarea.remove();
+      }
+      showToast('Copied to clipboard');
+    } catch (_) { showToast('Could not copy the response'); }
+  }
+
+  function renderSources(sources) {
+    if (!Array.isArray(sources) || !sources.length) return '';
+    const items = sources.slice(0, 12).map((source, index) => {
+      const title = escapeHtml(source.title || source.location || `Source ${index + 1}`);
+      const location = escapeHtml(source.location || '');
+      const href = /^https?:\/\//i.test(source.location || '')
+        ? `<a href="${location}" target="_blank" rel="noopener noreferrer">${location}</a>` : location;
+      return `<li><span class="source-number">[${index + 1}]</span><div><strong>${title}</strong><span class="source-location">${href}</span>${source.excerpt ? `<span class="source-excerpt">${escapeHtml(source.excerpt)}</span>` : ''}</div></li>`;
+    }).join('');
+    return `<details class="source-list"><summary>Sources · ${sources.length}</summary><ol>${items}</ol></details>`;
+  }
+
+  function addAssistantActions(container, content, retry) {
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+    actions.innerHTML = '<button type="button" class="message-action-btn" data-action="copy">Copy</button>' +
+      (retry ? '<button type="button" class="message-action-btn" data-action="retry">Retry</button>' : '');
+    actions.querySelector('[data-action="copy"]')?.addEventListener('click', () => copyText(content));
+    actions.querySelector('[data-action="retry"]')?.addEventListener('click', () => retry());
+    container.appendChild(actions);
+  }
+
+  function renderAssistantBubble(content, { sources = [], retry = null } = {}) {
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble agent';
+    const sourceHtml = renderSources(sources);
+    bubble.innerHTML = '<div class="bubble-header"><span class="tool-dot"></span><span>Jevora</span></div>' +
+      `<div class="bubble-content"><div class="md-content assistant-response">${renderMarkdown(content || '')}</div>${sourceHtml}</div>`;
+    const bubbleContent = bubble.querySelector('.bubble-content');
+    addAssistantActions(bubbleContent, content || '', retry);
+    return bubble;
   }
 
   function handleSendMessage() {
@@ -750,6 +915,13 @@ document.addEventListener('DOMContentLoaded', () => {
       this.setStatus(run.status);
       this.streamEl.textContent = '';
       this.finalEl.innerHTML = renderMarkdown(run.final_output || 'The run completed without an output.');
+      this.el.querySelector('.message-actions')?.remove();
+      const bubbleContent = this.finalEl.parentElement || this.finalEl.parent || this.el;
+      const sourceHtml = renderSources(run.meta?.sources || []);
+      if (sourceHtml) bubbleContent.innerHTML += sourceHtml;
+      addAssistantActions(bubbleContent, run.final_output || '', () => {
+        runAgentTask(run.task || '', run.attachments || []);
+      });
       const decision = run.decisions?.at(-1);
       const engine = decision?.engine ? ` · ${decision.engine}` : '';
       this.decisionEl.textContent = `Decision engine: ${decision?.choice || 'pending'} (${Math.round((decision?.confidence || 0) * 100)}% confidence) · ${run.status}${engine}`;
@@ -868,7 +1040,7 @@ document.addEventListener('DOMContentLoaded', () => {
     scrollMessagesToBottom();
     try {
       const body = { text: prompt, mode: currentMode === 'general' ? 'research' : currentMode, model: selectedModel.key,
-        attachments: attachmentIds };
+        web_search: currentMode === 'research' || webSearchEnabled, attachments: attachmentIds };
       if (selectedAgent) body.agent_id = selectedAgent.id;
       if (conversationId) body.conversation_id = conversationId;
       const created = await api.post('/api/runs', body);
@@ -1379,18 +1551,22 @@ document.addEventListener('DOMContentLoaded', () => {
       currentMode = conversation.mode === 'general' ? 'research' : conversation.mode || 'chat';
       modeDropdownItems.forEach((item) => item.classList.toggle('active', item.dataset.mode === currentMode));
       if (modeDropdownLabel) modeDropdownLabel.textContent = currentMode.charAt(0).toUpperCase() + currentMode.slice(1);
+      applyModeSurface();
       activeConversationTitle = conversation.title || 'Untitled conversation';
       setConversationId(conversation.id);
       streamContainer.innerHTML = '';
       const unfinished = (conversation.runs || []).filter((run) => !['done', 'failed', 'cancelled', 'canceled'].includes(run.status));
       const unfinishedIds = new Set(unfinished.map((run) => run.id));
+      const runById = new Map((conversation.runs || []).map((run) => [run.id, run]));
       const messages = [...(conversation.messages || [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       messages.forEach((message) => {
-        if (message.role === 'user') appendUserBubble(message.content, []);
+        if (message.role === 'user') appendUserBubble(message.content, [], { messageId: message.id });
         else if (message.role === 'assistant' && !unfinishedIds.has(message.run_id)) {
-          const bubble = document.createElement('div');
-          bubble.className = 'message-bubble agent';
-          bubble.innerHTML = `<div class="bubble-header"><span class="tool-dot"></span><span>Jevora</span></div><div class="bubble-content md-content">${renderMarkdown(message.content)}</div>`;
+          const run = runById.get(message.run_id);
+          const bubble = renderAssistantBubble(message.content, {
+            sources: run?.meta?.sources || [],
+            retry: run ? () => runAgentTask(run.task || '', run.attachments || []) : null,
+          });
           streamContainer.appendChild(bubble);
         }
       });
@@ -1533,6 +1709,23 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSavedProviders();
   let selectedModel = { key: 'auto', label: 'Auto' };
 
+  async function refreshWebSearchStatus() {
+    try {
+      const query = selectedModel.key && selectedModel.key !== 'auto'
+        ? `?model=${encodeURIComponent(selectedModel.key)}` : '';
+      webSearchStatus = await api.get(`/api/web-search/status${query}`);
+    } catch (_) {
+      webSearchStatus = { available: false, mode: 'none', reason: 'Web-search capability could not be checked.' };
+    }
+    renderWebSearchState();
+    const webItem = $('webSearchMenuItem');
+    if (webItem) webItem.title = webSearchStatus.available
+      ? `Search the web with ${webSearchStatus.mode === 'native' ? 'the selected provider' : 'Jevora Browser'}`
+      : (webSearchStatus.reason || 'Web search is unavailable for this model');
+    if (!webSearchStatus.available && webSearchEnabled) setWebSearchEnabled(false);
+    return webSearchStatus;
+  }
+
   const PANEL_NONE = 0; const PANEL_MODEL = 1; const PANEL_PROVIDERS = 2; const PANEL_CUSTOM = 3;
   let activePanel = PANEL_NONE;
 
@@ -1606,6 +1799,7 @@ document.addEventListener('DOMContentLoaded', () => {
     selectedModel = { key, label };
     syncSelectedModelUI();
     if (modelBadge) modelBadge.textContent = `${label} ›`;
+    refreshWebSearchStatus();
   }
 
   modelItems.forEach((item) => {
@@ -1788,19 +1982,17 @@ document.addEventListener('DOMContentLoaded', () => {
       loadSavedProviders();
       renderProfile();
     } catch (_) { /* backend offline */ }
+    try { webSearchEnabled = localStorage.getItem(webSearchStorageKey()) === '1'; } catch (_) { webSearchEnabled = false; }
+    applyModeSurface();
+    renderWebSearchState();
     if (revision !== sessionRevision && !conversationLoading) setConversationId(conversationId);
     await restoreConversation(revision);
     loadRecentConversations();
     try {
       features = await api.get('/api/features');
       const webItem = $('webSearchMenuItem');
-      if (features.web_search && webItem) {
-        webItem.classList.remove('disabled');
-        webItem.removeAttribute('aria-disabled');
-        webItem.title = 'Search the web (Research mode)';
-        webItem.querySelector('.menu-label')?.classList.remove('struck');
-        webItem.querySelector('.menu-dot')?.classList.remove('disabled-dot');
-      }
+      if (webItem) webItem.title = 'Checking web-search capability…';
+      await refreshWebSearchStatus();
     } catch (_) { features = {}; }
     try {
       const health = await api.get('/api/system/health?probe=false');
