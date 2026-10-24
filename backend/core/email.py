@@ -55,8 +55,9 @@ class EmailService:
         message["To"] = recipient
         message["Subject"] = subject
         message.set_content(body)
-        with smtplib.SMTP(host, self.settings.smtp_port, timeout=20) as server:
-            if self.settings.smtp_use_tls:
+        smtp_client = smtplib.SMTP_SSL if self.settings.smtp_use_ssl else smtplib.SMTP
+        with smtp_client(host, self.settings.smtp_port, timeout=20) as server:
+            if self.settings.smtp_use_tls and not self.settings.smtp_use_ssl:
                 server.starttls()
             if self.settings.smtp_username:
                 server.login(self.settings.smtp_username, self.settings.smtp_password.get_secret_value()

@@ -12,6 +12,7 @@ services:
     environment:
       WORKSPACE_ROOT: ${JEVORA_WORKSPACE:-${PWD}/workspace}
       VAULT_PATH: /data/vault
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       SANDBOX_MODE: docker
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
@@ -22,6 +23,7 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-no-reply@jevora.local}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Jevora IDE}
       WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-false}

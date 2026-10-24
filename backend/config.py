@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: SecretStr | None = None
     smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
     smtp_from_email: str = "no-reply@jevora.local"
     smtp_from_name: str = "Jevora IDE"
     password_reset_otp_ttl_minutes: int = 10

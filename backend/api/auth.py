@@ -67,7 +67,7 @@ class LoginBody(BaseModel):
     @field_validator("email")
     @classmethod
     def normalize_email(cls, value: str) -> str:
-        return value.strip().lower()
+        return _normalize_email(value)
 
 
 class ForgotPasswordBody(BaseModel):
@@ -154,7 +154,9 @@ async def login(body: LoginBody, request: Request, response: Response, ctx: Ctx)
             raise RateLimited("too many login attempts; try again shortly", retry_after=retry)
     async with ctx.sessions() as session:
         user = await session.scalar(select(User).where(User.email == body.email))
-    if user is None or not verify_password(user.password_hash if user else None, body.password):
+    if user is None:
+        raise NotFound("email not registered", code="email_not_registered")
+    if not verify_password(user.password_hash, body.password):
         raise Unauthorized("invalid email or password", code="invalid_credentials")
     ctx.login_limiter.reset(f"login:{ip}:{body.email}")
     return await _issue_session(ctx, user, response, request)
@@ -162,7 +164,7 @@ async def login(body: LoginBody, request: Request, response: Response, ctx: Ctx)
 
 @router.post("/forgot-password")
 async def forgot_password(body: ForgotPasswordBody, request: Request, ctx: Ctx) -> dict[str, Any]:
-    """Start a password reset without revealing whether an email is registered."""
+    """Create and deliver a password reset OTP for a registered email address."""
     ip = _client_ip(request)
     for limiter, key in ((ctx.password_reset_ip_limiter, f"password-reset-ip:{ip}"),
                          (ctx.password_reset_limiter, f"password-reset:{body.email}")):
@@ -173,7 +175,7 @@ async def forgot_password(body: ForgotPasswordBody, request: Request, ctx: Ctx) 
     async with ctx.sessions() as session:
         user = await session.scalar(select(User).where(User.email == body.email))
         if user is None:
-            return {"ok": True, "message": "If an account exists, a verification code has been sent."}
+            raise NotFound("email not registered", code="email_not_registered")
         await session.execute(update(PasswordResetChallenge).where(
             PasswordResetChallenge.user_id == user.id,
             PasswordResetChallenge.consumed_at.is_(None),
@@ -189,20 +191,22 @@ async def forgot_password(body: ForgotPasswordBody, request: Request, ctx: Ctx) 
         )
         session.add(challenge)
         await session.commit()
+    challenge_id = challenge.id
     try:
         await ctx.mailer.send_password_reset_otp(body.email, otp, ctx.settings.password_reset_otp_ttl_minutes)
     except Exception:
         log.exception("password reset email delivery failed")
         async with ctx.sessions() as session:
-            row = await session.get(PasswordResetChallenge, challenge.id)
+            row = await session.get(PasswordResetChallenge, challenge_id)
             if row is not None:
                 row.consumed_at = utcnow()
                 await session.commit()
-        # Keep the response identical for known and unknown addresses. The
-        # delivery failure is operationally visible in server logs without
-        # becoming an account-enumeration oracle.
-        return {"ok": True, "message": "If an account exists, a verification code has been sent."}
-    return {"ok": True, "message": "If an account exists, a verification code has been sent."}
+        raise AppError(
+            "password reset email could not be sent; check the SMTP configuration and try again",
+            code="email_delivery_failed",
+            status_code=503,
+        ) from None
+    return {"ok": True, "message": "verification code sent"}
 
 
 @router.post("/verify-password-reset-otp")
