@@ -186,6 +186,11 @@ async def test_auth_flow_in_browser(tmp_path: Path) -> None:
             page.click("#githubBtn")
             page.wait_for_selector("#authMessage:not([hidden])")
             assert "GitHub sign-in is not configured" in page.inner_text("#authMessage")
+            page.fill("#emailInput", "missing@example.com")
+            page.fill("#passwordInput", "analytical-engine")
+            page.click("#submitBtn")
+            page.wait_for_selector("#authMessage.error")
+            assert page.inner_text("#authMessage").lower() == "email not registered"
             page.click("#switchModeBtn")
             page.fill("#nameInput", "Ada Lovelace")
             page.fill("#emailInput", "ada@example.com")

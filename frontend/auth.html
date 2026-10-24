@@ -395,6 +395,8 @@
       if (!response.ok) {
         let detail = data.detail;
         if (Array.isArray(detail)) detail = detail.map((d) => d.msg).join(' ');
+        if (data.code === 'email_not_registered') detail = 'Email not registered';
+        if (data.code === 'email_delivery_failed') detail = 'Unable to send the OTP email. Please try again later.';
         if (response.status === 429) {
           const wait = response.headers.get('Retry-After');
           detail = `Too many attempts. Try again${wait ? ` in ${wait}s` : ' shortly'}.`;

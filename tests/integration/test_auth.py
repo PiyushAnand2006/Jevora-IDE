@@ -88,11 +88,20 @@ async def test_signup_login_me_refresh_logout(secured: AppHarness) -> None:
 async def test_wrong_password_and_rate_limit(secured: AppHarness) -> None:
     client = secured.client
     await _signup(client, "bob@example.com")
+    unknown = await client.post("/api/auth/login", json={"email": "missing@example.com", "password": "nope"})
+    assert unknown.status_code == 404 and unknown.json()["code"] == "email_not_registered"
     for _ in range(3):
         bad = await client.post("/api/auth/login", json={"email": "bob@example.com", "password": "nope"})
         assert bad.status_code == 401 and bad.json()["code"] == "invalid_credentials"
     limited = await client.post("/api/auth/login", json={"email": "bob@example.com", "password": "nope"})
     assert limited.status_code == 429 and "retry-after" in limited.headers
+
+
+async def test_password_reset_rejects_unregistered_email_without_sending(secured: AppHarness) -> None:
+    response = await secured.client.post("/api/auth/forgot-password", json={"email": "missing@example.com"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "email not registered", "code": "email_not_registered"}
+    assert secured.ctx.mailer.outbox == []
 
 
 async def test_expired_access_token(secured: AppHarness) -> None:
@@ -116,8 +125,9 @@ async def test_password_reset_otp_updates_hashed_password_and_revokes_sessions(s
 
     requested = await client.post("/api/auth/forgot-password", json={"email": "RESET@example.com"})
     assert requested.status_code == 200
-    assert "password" not in requested.text.lower()
+    assert requested.json() == {"ok": True, "message": "verification code sent"}
     message = secured.ctx.mailer.outbox[-1].body
+    assert secured.ctx.mailer.outbox[-1].recipient == "reset@example.com"
     match = re.search(r"code is: (\d{6})", message)
     assert match is not None
     otp = match.group(1)
@@ -145,6 +155,42 @@ async def test_password_reset_otp_updates_hashed_password_and_revokes_sessions(s
         from backend.db.models import User
         user = await session.get(User, created["user"]["id"])
     assert user is not None and user.password_hash and "new-correct-horse-2" not in user.password_hash
+
+
+async def test_password_reset_sends_the_verifiable_otp_through_smtp(secured: AppHarness, monkeypatch) -> None:
+    sent = []
+
+    class FakeSMTP:
+        def __init__(self, host: str, port: int, timeout: int) -> None:
+            assert (host, port, timeout) == ("smtp.example.com", 587, 20)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def starttls(self) -> None:
+            pass
+
+        def send_message(self, message) -> None:
+            sent.append(message)
+
+    monkeypatch.setattr("backend.core.email.smtplib.SMTP", FakeSMTP)
+    secured.ctx.settings.smtp_host = "smtp.example.com"
+    await _signup(secured.client, "smtp@example.com")
+
+    response = await secured.client.post("/api/auth/forgot-password", json={"email": "smtp@example.com"})
+    assert response.status_code == 200
+    assert len(sent) == 1
+    assert sent[0]["To"] == "smtp@example.com"
+    assert sent[0]["Subject"] == "Your Jevora IDE password reset code"
+    match = re.search(r"code is: (\d{6})", sent[0].get_content())
+    assert match is not None
+
+    verified = await secured.client.post("/api/auth/verify-password-reset-otp", json={
+        "email": "smtp@example.com", "otp": match.group(1)})
+    assert verified.status_code == 200
 
 
 async def test_authenticated_history_and_settings_are_user_scoped(secured: AppHarness) -> None:
