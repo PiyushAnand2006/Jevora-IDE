@@ -14,7 +14,16 @@ services:
       VAULT_PATH: /data/vault
       SANDBOX_MODE: docker
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://jevora:jevora_dev_password@postgres:5432/jevora}
+      LANGGRAPH_STRICT_MSGPACK: ${LANGGRAPH_STRICT_MSGPACK:-true}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-no-reply@jevora.local}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Jevora IDE}
       WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-false}
       SCREEN_ALLOWED_DOMAINS: '["localhost","127.0.0.1","host.docker.internal"]'
     volumes:
@@ -23,7 +32,24 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-jevora}
+      POSTGRES_USER: ${POSTGRES_USER:-jevora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jevora_dev_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   # Optional local model server: `docker compose --profile ollama up`
   ollama:
@@ -36,4 +62,5 @@ services:
 
 volumes:
   jevora-data:
+  postgres-data:
   ollama-models:

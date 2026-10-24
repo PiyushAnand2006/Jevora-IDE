@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 import threading
 import time
@@ -122,6 +123,15 @@ def new_refresh_token() -> tuple[str, str]:
 
 def hash_refresh_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def hash_otp(code: str, salt: str) -> str:
+    """Hash a short-lived OTP with a per-challenge salt."""
+    return hmac.new(salt.encode("utf-8"), code.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_otp(code_hash: str, code: str, salt: str) -> bool:
+    return secrets.compare_digest(code_hash, hash_otp(code, salt))
 
 
 class SlidingWindowRateLimiter:

@@ -6,6 +6,7 @@ import base64
 import hashlib
 import re
 import secrets
+from datetime import timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -24,13 +25,15 @@ from backend.core.security import (
     OAUTH_STATE_COOKIE,
     REFRESH_COOKIE,
     TokenError,
+    hash_otp,
     hash_password,
     hash_refresh_token,
     new_refresh_token,
+    verify_otp,
     verify_password,
 )
 from backend.core.users import user_public
-from backend.db.models import OAuthAccount, RefreshToken, User
+from backend.db.models import OAuthAccount, PasswordResetChallenge, RefreshToken, User
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -65,6 +68,30 @@ class LoginBody(BaseModel):
     @classmethod
     def normalize_email(cls, value: str) -> str:
         return value.strip().lower()
+
+
+class ForgotPasswordBody(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return _normalize_email(value)
+
+
+class VerifyOtpBody(BaseModel):
+    email: str
+    otp: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return _normalize_email(value)
+
+
+class ResetPasswordBody(BaseModel):
+    reset_token: str = Field(min_length=20, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
 
 
 def _client_ip(request: Request) -> str:
@@ -131,6 +158,96 @@ async def login(body: LoginBody, request: Request, response: Response, ctx: Ctx)
         raise Unauthorized("invalid email or password", code="invalid_credentials")
     ctx.login_limiter.reset(f"login:{ip}:{body.email}")
     return await _issue_session(ctx, user, response, request)
+
+
+@router.post("/forgot-password")
+async def forgot_password(body: ForgotPasswordBody, request: Request, ctx: Ctx) -> dict[str, Any]:
+    """Start a password reset without revealing whether an email is registered."""
+    ip = _client_ip(request)
+    for limiter, key in ((ctx.password_reset_ip_limiter, f"password-reset-ip:{ip}"),
+                         (ctx.password_reset_limiter, f"password-reset:{body.email}")):
+        allowed, retry = limiter.hit(key)
+        if not allowed:
+            raise RateLimited("too many password reset attempts; try again shortly", retry_after=retry)
+
+    async with ctx.sessions() as session:
+        user = await session.scalar(select(User).where(User.email == body.email))
+        if user is None:
+            return {"ok": True, "message": "If an account exists, a verification code has been sent."}
+        await session.execute(update(PasswordResetChallenge).where(
+            PasswordResetChallenge.user_id == user.id,
+            PasswordResetChallenge.consumed_at.is_(None),
+        ).values(consumed_at=utcnow()))
+        otp = f"{secrets.randbelow(1_000_000):06d}"
+        salt = secrets.token_urlsafe(18)
+        challenge = PasswordResetChallenge(
+            user_id=user.id,
+            email=body.email,
+            code_salt=salt,
+            code_hash=hash_otp(otp, salt),
+            expires_at=utcnow() + timedelta(minutes=ctx.settings.password_reset_otp_ttl_minutes),
+        )
+        session.add(challenge)
+        await session.commit()
+    try:
+        await ctx.mailer.send_password_reset_otp(body.email, otp, ctx.settings.password_reset_otp_ttl_minutes)
+    except Exception:
+        log.exception("password reset email delivery failed")
+        async with ctx.sessions() as session:
+            row = await session.get(PasswordResetChallenge, challenge.id)
+            if row is not None:
+                row.consumed_at = utcnow()
+                await session.commit()
+        # Keep the response identical for known and unknown addresses. The
+        # delivery failure is operationally visible in server logs without
+        # becoming an account-enumeration oracle.
+        return {"ok": True, "message": "If an account exists, a verification code has been sent."}
+    return {"ok": True, "message": "If an account exists, a verification code has been sent."}
+
+
+@router.post("/verify-password-reset-otp")
+async def verify_password_reset_otp(body: VerifyOtpBody, ctx: Ctx) -> dict[str, Any]:
+    async with ctx.sessions() as session:
+        challenge = await session.scalar(select(PasswordResetChallenge).where(
+            PasswordResetChallenge.email == body.email,
+            PasswordResetChallenge.consumed_at.is_(None),
+            PasswordResetChallenge.verified_at.is_(None),
+        ).order_by(PasswordResetChallenge.created_at.desc()))
+        if (challenge is None or challenge.expires_at <= utcnow()
+                or challenge.attempts >= ctx.settings.password_reset_max_attempts):
+            raise Unauthorized("invalid or expired verification code", code="invalid_reset_otp")
+        challenge.attempts += 1
+        if not verify_otp(challenge.code_hash, body.otp, challenge.code_salt):
+            await session.commit()
+            raise Unauthorized("invalid or expired verification code", code="invalid_reset_otp")
+        reset_token = secrets.token_urlsafe(32)
+        challenge.reset_token_hash = hash_refresh_token(reset_token)
+        challenge.verified_at = utcnow()
+        await session.commit()
+    return {"ok": True, "reset_token": reset_token}
+
+
+@router.post("/reset-password")
+async def reset_password(body: ResetPasswordBody, ctx: Ctx) -> dict[str, Any]:
+    async with ctx.sessions() as session:
+        challenge = await session.scalar(select(PasswordResetChallenge).where(
+            PasswordResetChallenge.reset_token_hash == hash_refresh_token(body.reset_token),
+            PasswordResetChallenge.consumed_at.is_(None),
+        ))
+        if challenge is None or challenge.verified_at is None or challenge.expires_at <= utcnow():
+            raise Unauthorized("invalid or expired password reset session", code="invalid_reset_token")
+        user = await session.get(User, challenge.user_id)
+        if user is None:
+            raise Unauthorized("invalid password reset session", code="invalid_reset_token")
+        user.password_hash = hash_password(body.new_password)
+        challenge.consumed_at = utcnow()
+        # Password reset invalidates every outstanding refresh session for this user.
+        await session.execute(update(RefreshToken).where(
+            RefreshToken.user_id == user.id,
+            RefreshToken.revoked_at.is_(None),
+        ).values(revoked_at=utcnow()))
+        await session.commit()
+    return {"ok": True, "message": "Password updated. You can now sign in."}
 
 
 @router.post("/refresh")

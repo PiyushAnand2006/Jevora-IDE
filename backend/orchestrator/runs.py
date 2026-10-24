@@ -228,7 +228,7 @@ class RunService:
         async with self.sessions() as session:
             await session.execute(delete(Run).where(Run.id == run_id))
             await session.commit()
-        await self.vault.delete_run(run_id)
+        await self.vault.delete_run(user_id, run_id)
         for hook in self.delete_hooks:
             await hook(run_id)
         self.events.publish("run.deleted", user_id=user_id, run_id=run_id, data={})

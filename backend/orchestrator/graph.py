@@ -7,7 +7,8 @@
               └─ run_command / critic(/review) / planner(/plan) / tester(/test) ───────────────→ finalize
 
 Conditional edges look at state: did tests pass, is confidence above threshold, is user input needed,
-was the iteration ceiling hit. State is checkpointed (SQLite) after every node, so runs survive a
+was the iteration ceiling hit. State is checkpointed in PostgreSQL for deployed environments
+(SQLite in tests), so runs survive a
 restart and resume after an escalation answer via ``interrupt``/``Command(resume=...)``.
 """
 
@@ -19,6 +20,7 @@ from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
@@ -136,16 +138,27 @@ class Orchestrator:
     def __init__(self, app: AppContext) -> None:
         self.app = app
         self._contexts: dict[str, RunContext] = {}
-        self._saver: AsyncSqliteSaver | None = None
-        self._saver_cm: AbstractAsyncContextManager[AsyncSqliteSaver] | None = None
+        self._saver: Any = None
+        self._saver_cm: AbstractAsyncContextManager[Any] | None = None
         self.graph: Any = None
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self) -> None:
-        path = self.app.settings.checkpoint_db_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._saver_cm = AsyncSqliteSaver.from_conn_string(str(path))
-        self._saver = await self._saver_cm.__aenter__()
+        database_url = self.app.settings.resolved_database_url
+        if database_url.startswith("postgresql+asyncpg://"):
+            # LangGraph's Postgres saver uses psycopg's async connection API,
+            # while the application ORM uses asyncpg through SQLAlchemy.
+            checkpoint_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+            self._saver_cm = AsyncPostgresSaver.from_conn_string(checkpoint_url)
+        else:
+            path = self.app.settings.checkpoint_db_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._saver_cm = AsyncSqliteSaver.from_conn_string(str(path))
+        saver_cm = self._saver_cm
+        assert saver_cm is not None
+        self._saver = await saver_cm.__aenter__()
+        if isinstance(self._saver, AsyncPostgresSaver):
+            await self._saver.setup()
         self.graph = self.build().compile(checkpointer=self._saver)
 
     async def stop(self) -> None:

@@ -41,7 +41,8 @@ async def patch_plugin(plugin_id: str, body: PluginPatch, user: CurrentUser, ctx
 # --------------------------------------------------------------------------- decision layer
 @router.get("/api/decision/config")
 async def get_decision_config(user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
-    return {"config": ctx.decisions.config.model_dump(), "status": await ctx.decisions.status()}
+    config = await ctx.decisions.get_config(user.id)
+    return {"config": config.model_dump(), "status": await ctx.decisions.status(user.id)}
 
 
 @router.put("/api/decision/config")
@@ -54,10 +55,10 @@ async def put_decision_config(body: dict[str, Any], user: CurrentUser, ctx: Ctx)
     if "primary" in body and body["primary"] not in ("laya", "jev", "rules"):
         raise AppError("primary must be laya, jev or rules", code="invalid_config", status_code=422)
     try:
-        config = await ctx.decisions.save_config(body)
+        config = await ctx.decisions.save_config(body, user.id)
     except ValueError as exc:
         raise AppError(f"invalid decision config: {exc}", code="invalid_config", status_code=422) from exc
-    return {"config": config.model_dump(), "status": await ctx.decisions.status()}
+    return {"config": config.model_dump(), "status": await ctx.decisions.status(user.id)}
 
 
 def _decision_public(d: Decision) -> dict[str, Any]:

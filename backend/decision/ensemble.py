@@ -20,11 +20,12 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.core.logging import get_logger
 from backend.core.metrics import Metrics
-from backend.db.models import Decision, SettingKV
+from backend.db.models import Decision, SettingKV, UserSetting
 from backend.decision.interface import DecisionEngine, EngineUnavailable
 from backend.decision.jev_engine import JevEngine
 from backend.decision.laya_engine import LayaEngine
@@ -85,22 +86,37 @@ class DecisionService:
         self.laya = laya
         self.jev = jev
         self.config = DecisionConfig(escalation_threshold=default_threshold)
-        laya._validated = lambda schema: bool(self.config.validated.get(schema, False))
+        self._configs: dict[str, DecisionConfig] = {}
         # Observers (e.g. plugin ``on_decision`` hooks) receive (result, user_id, run_id) after logging.
         self.observers: list[Callable[[DecisionResult, str | None, str | None], Awaitable[None]]] = []
 
     # ------------------------------------------------------------------ config
-    async def load_config(self) -> DecisionConfig:
+    async def load_config(self, user_id: str | None = None) -> DecisionConfig:
         async with self.sessions() as session:
-            row = await session.get(SettingKV, CONFIG_KEY)
+            if user_id is None:
+                row = await session.get(SettingKV, CONFIG_KEY)
+            else:
+                row = await session.scalar(select(UserSetting).where(UserSetting.user_id == user_id,
+                                                                      UserSetting.key == CONFIG_KEY))
+        base = self.config if user_id is None else DecisionConfig(escalation_threshold=self.config.escalation_threshold)
         if row is not None and isinstance(row.value, dict):
-            merged = self.config.model_dump()
+            merged = base.model_dump()
             merged.update(row.value)
-            self.config = DecisionConfig.model_validate(merged)
-        return self.config
+            base = DecisionConfig.model_validate(merged)
+        if user_id is None:
+            self.config = base
+        else:
+            self._configs[user_id] = base
+        return base
 
-    async def save_config(self, updates: dict[str, Any]) -> DecisionConfig:
-        merged = self.config.model_dump()
+    async def get_config(self, user_id: str) -> DecisionConfig:
+        if user_id not in self._configs:
+            await self.load_config(user_id)
+        return self._configs[user_id]
+
+    async def save_config(self, updates: dict[str, Any], user_id: str | None = None) -> DecisionConfig:
+        current = self.config if user_id is None else await self.get_config(user_id)
+        merged = current.model_dump()
         for key, value in updates.items():
             if isinstance(value, dict) and isinstance(merged.get(key), dict):
                 inner = dict(merged[key])
@@ -110,38 +126,50 @@ class DecisionService:
                 merged[key] = inner
             else:
                 merged[key] = value
-        self.config = DecisionConfig.model_validate(merged)
+        config = DecisionConfig.model_validate(merged)
+        if user_id is None:
+            self.config = config
+        else:
+            self._configs[user_id] = config
         async with self.sessions() as session:
-            row = await session.get(SettingKV, CONFIG_KEY)
-            if row is None:
-                session.add(SettingKV(key=CONFIG_KEY, value=self.config.model_dump()))
+            if user_id is None:
+                row = await session.get(SettingKV, CONFIG_KEY)
             else:
-                row.value = self.config.model_dump()
+                row = await session.scalar(select(UserSetting).where(UserSetting.user_id == user_id,
+                                                                      UserSetting.key == CONFIG_KEY))
+            if row is None and user_id is None:
+                session.add(SettingKV(key=CONFIG_KEY, value=config.model_dump()))
+            elif row is None:
+                session.add(UserSetting(user_id=user_id, key=CONFIG_KEY, value=config.model_dump()))
+            else:
+                row.value = config.model_dump()
             await session.commit()
-        return self.config
+        return config
 
     def engine(self, name: str) -> DecisionEngine | None:
         return {"laya": self.laya, "jev": self.jev, "rules": self.rules}.get(name)
 
-    async def active_engine(self) -> str:
+    async def active_engine(self, user_id: str | None = None) -> str:
         """The engine that currently acts on verification decisions (shown in the UI)."""
-        if await self.laya.available() and self.config.validated.get("verification"):
+        cfg = self.config if user_id is None else await self.get_config(user_id)
+        if await self.laya.available() and cfg.validated.get("verification"):
             return "Laya"
         if await self.jev.available():
             return "Jev"
         return "Rules"
 
-    async def status(self) -> dict[str, Any]:
+    async def status(self, user_id: str | None = None) -> dict[str, Any]:
+        cfg = self.config if user_id is None else await self.get_config(user_id)
         laya_ok = await self.laya.available()
         return {
             "ok": True,
-            "active": await self.active_engine(),
+            "active": await self.active_engine(user_id),
             "primary": {**self.laya.describe(), "available": laya_ok,
-                        "validated": self.config.validated, "mode": "acting" if any(self.config.validated.values())
+                        "validated": cfg.validated, "mode": "acting" if any(cfg.validated.values())
                         else "shadow"},
             "fallback": {**self.jev.describe(), "available": await self.jev.available()},
             "rules": {**self.rules.describe(), "available": True},
-            "escalation_threshold": self.config.escalation_threshold,
+            "escalation_threshold": cfg.escalation_threshold,
         }
 
     # ------------------------------------------------------------------ core policy
@@ -161,7 +189,7 @@ class DecisionService:
     async def decide(self, question: DecisionQuestion, evidence: Evidence | None = None, *,
                      recorder: RunRecorder | None = None, call_id: str | None = None) -> DecisionOutcome:
         started = time.perf_counter()
-        cfg = self.config
+        cfg = self.config if recorder is None else await self.get_config(recorder.user_id)
         schema = question.type
         rules_result = await self.rules.decide(question, evidence)
         shadow: list[DecisionResult] = []
@@ -172,7 +200,7 @@ class DecisionService:
         if primary is not None and primary is not self.rules:
             primary_result = await self._run_engine(primary, question, evidence)
             if primary_result is not None:
-                trusted = (primary.validated(schema) and not question.high_risk
+                trusted = (cfg.validated.get(schema, False) and not question.high_risk
                            and primary_result.confidence >= cfg.threshold(primary.name, schema))
                 if trusted:
                     acting = primary_result
@@ -180,7 +208,8 @@ class DecisionService:
                     primary_result.shadow = True
                     primary_result.reason = (primary_result.reason + "; shadow: " + (
                         "high-risk action" if question.high_risk else
-                        "schema not validated" if not primary.validated(schema) else "below threshold")).strip("; ")
+                        "schema not validated" if not cfg.validated.get(schema, False) else "below threshold"
+                    )).strip("; ")
                     shadow.append(primary_result)
         if acting is None:
             fallback_used = primary is not None and primary is not self.rules
@@ -202,39 +231,43 @@ class DecisionService:
             if acting is None:
                 acting = rules_result
 
-        acting = acting.model_copy()
-        acting.fallback_used = fallback_used
+        acting_result = acting.model_copy()
+        acting_result.fallback_used = fallback_used
         options = SCHEMA_CHOICES[schema]
 
         # 4. Safety: a model can never confirm work the evidence rules reject (and vice versa).
-        if (schema == "verification" and acting.engine != "rules" and cfg.escalate_on_disagreement
-                and (acting.choice == "confirm_done") != (rules_result.choice == "confirm_done")):
-            acting = DecisionResult(type=schema, choice="escalate", confidence=round(1 - abs(
-                acting.confidence - rules_result.confidence) / 2, 4),
-                scores_per_option=distribution(list(options), "escalate", 0.6), engine=f"{acting.engine}+rules",
+        if (schema == "verification" and acting_result.engine != "rules" and cfg.escalate_on_disagreement
+                and (acting_result.choice == "confirm_done") != (rules_result.choice == "confirm_done")):
+            acting_result = DecisionResult(type=schema, choice="escalate", confidence=round(1 - abs(
+                acting_result.confidence - rules_result.confidence) / 2, 4),
+                scores_per_option=distribution(list(options), "escalate", 0.6), engine=f"{acting_result.engine}+rules",
                 fallback_used=fallback_used,
-                reason=f"engines disagree: {acting.engine}={acting.choice} vs rules={rules_result.choice}")
+                reason=(f"engines disagree: {acting_result.engine}={acting_result.choice} "
+                        f"vs rules={rules_result.choice}"))
 
         # 5. Low confidence → user escalation (or default category for routing).
-        if acting.confidence < cfg.escalation_threshold:
-            if "escalate" in options and acting.choice != "escalate":
-                acting = DecisionResult(type=schema, choice="escalate", confidence=round(1 - acting.confidence, 4),
-                                        scores_per_option=acting.scores_per_option, engine=acting.engine,
+        if acting_result.confidence < cfg.escalation_threshold:
+            if "escalate" in options and acting_result.choice != "escalate":
+                acting_result = DecisionResult(
+                    type=schema, choice="escalate", confidence=round(1 - acting_result.confidence, 4),
+                                        scores_per_option=acting_result.scores_per_option, engine=acting_result.engine,
                                         fallback_used=fallback_used,
-                                        reason=f"confidence {acting.confidence:.2f} below escalation threshold "
-                                               f"{cfg.escalation_threshold:.2f} ({acting.reason})")
-            elif schema == "routing" and acting.engine != "rules":
-                acting = rules_result.model_copy(update={"fallback_used": True})
-        acting.shadow_results = shadow
-        if not acting.latency_ms:
-            acting.latency_ms = round((time.perf_counter() - started) * 1000, 3)
-        decision_id = await self._log(question, evidence, acting, shadow, recorder, call_id)
+                                        reason=f"confidence {acting_result.confidence:.2f} below escalation threshold "
+                                               f"{cfg.escalation_threshold:.2f} ({acting_result.reason})")
+            elif schema == "routing" and acting_result.engine != "rules":
+                acting_result = rules_result.model_copy(update={"fallback_used": True})
+        acting_result.shadow_results = shadow
+        if not acting_result.latency_ms:
+            acting_result.latency_ms = round((time.perf_counter() - started) * 1000, 3)
+        decision_id = await self._log(question, evidence, acting_result, shadow, recorder, call_id)
         for observer in self.observers:
             try:
-                await observer(acting, recorder.user_id if recorder else None, recorder.run_id if recorder else None)
+                await observer(
+                    acting_result, recorder.user_id if recorder else None, recorder.run_id if recorder else None
+                )
             except Exception:
                 log.exception("decision observer failed")
-        return DecisionOutcome(result=acting, decision_id=decision_id, shadow=shadow, rules=rules_result)
+        return DecisionOutcome(result=acting_result, decision_id=decision_id, shadow=shadow, rules=rules_result)
 
     async def _log(self, question: DecisionQuestion, evidence: Evidence | None, acting: DecisionResult,
                    shadow: list[DecisionResult], recorder: RunRecorder | None, call_id: str | None) -> str | None:

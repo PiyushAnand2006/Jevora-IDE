@@ -39,7 +39,13 @@ def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 
 
 def sync_url(url: str) -> str:
-    return url.replace("+aiosqlite", "")
+    if url.startswith("sqlite+aiosqlite://"):
+        return url.replace("+aiosqlite", "", 1)
+    if url.startswith("postgresql+asyncpg://"):
+        return url.replace("+asyncpg", "+psycopg", 1)
+    if url.startswith("postgres+asyncpg://"):
+        return "postgresql+psycopg://" + url[len("postgres+asyncpg://"):]
+    return url
 
 
 def alembic_config(url: str) -> Config:

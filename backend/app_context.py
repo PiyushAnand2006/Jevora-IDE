@@ -18,6 +18,7 @@ from backend.agents.tools.base import ToolRegistry
 from backend.agents.tools.search import WebSearchService, WebSearchTool
 from backend.config import Settings
 from backend.core.crypto import SecretBox, load_secret_box
+from backend.core.email import EmailService
 from backend.core.events import EventBus
 from backend.core.metrics import Metrics
 from backend.core.security import SlidingWindowRateLimiter, TokenService, load_jwt_secret
@@ -54,6 +55,9 @@ class AppContext:
     router: ProviderRouter
     login_limiter: SlidingWindowRateLimiter
     ip_limiter: SlidingWindowRateLimiter
+    password_reset_limiter: SlidingWindowRateLimiter
+    password_reset_ip_limiter: SlidingWindowRateLimiter
+    mailer: EmailService
     local_user_id: str
     events: EventBus
     vault: VaultService
@@ -102,8 +106,7 @@ class AppContext:
         import asyncio
 
         self.events.bind_loop(asyncio.get_running_loop())
-        await self.vault.load_config()
-        await self.decisions.load_config()
+        await self.vault.load_config(self.local_user_id)
         self.plugins.load_third_party(self.settings.plugins_dir)
         await self.orchestrator.start()
         await self.mcp.start_enabled()
@@ -191,6 +194,9 @@ async def build_context(settings: Settings, http_transport: httpx.AsyncBaseTrans
         router=router,
         login_limiter=SlidingWindowRateLimiter(settings.login_rate_limit_per_minute, 60.0),
         ip_limiter=SlidingWindowRateLimiter(settings.login_rate_limit_per_ip_per_minute, 60.0),
+        password_reset_limiter=SlidingWindowRateLimiter(5, 15 * 60.0),
+        password_reset_ip_limiter=SlidingWindowRateLimiter(20, 15 * 60.0),
+        mailer=EmailService(settings),
         local_user_id=local_user.id,
         events=events,
         vault=vault,
@@ -211,23 +217,24 @@ async def build_context(settings: Settings, http_transport: httpx.AsyncBaseTrans
         web_search=WebSearchService(settings, http),
     )
 
-    async def _vault_health(_user_id: str) -> dict[str, Any]:
-        return await vault.status()
+    async def _vault_health(user_id: str) -> dict[str, Any]:
+        return await vault.status(user_id)
 
     async def _sandbox_health(_user_id: str) -> dict[str, Any]:
         return await sandboxes.status()
 
-    async def _decision_health(_user_id: str) -> dict[str, Any]:
-        return await ctx.decisions.status()
+    async def _decision_health(user_id: str) -> dict[str, Any]:
+        return await ctx.decisions.status(user_id)
 
     async def _orchestrator_health(_user_id: str) -> dict[str, Any]:
         return {"ok": ctx.orchestrator.graph is not None, "engine": "LangGraph",
                 "active_runs": executor.active_count, "queued_runs": executor.queued_count,
-                "checkpoints": str(settings.checkpoint_db_path)}
+                "checkpoints": "PostgreSQL" if settings.resolved_database_url.startswith("postgresql")
+                else str(settings.checkpoint_db_path)}
 
     async def _mcp_health(user_id: str) -> dict[str, Any]:
         builtin = [
-            {"name": "Decision Engine", "kind": "builtin", **(await ctx.decisions.status())},
+            {"name": "Decision Engine", "kind": "builtin", **(await ctx.decisions.status(user_id))},
             {"name": "LangGraph Orchestrator", "kind": "builtin", "ok": ctx.orchestrator.graph is not None},
             {"name": "System Tool & Sandbox", "kind": "builtin", **(await sandboxes.status())},
         ]

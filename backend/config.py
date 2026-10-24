@@ -10,6 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,6 +32,11 @@ class Settings(BaseSettings):
     log_json: bool = True
     data_dir: Path = PROJECT_ROOT / ".jevora-data"
     database_url: str | None = None
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str = "jevora"
+    postgres_user: str = "jevora"
+    postgres_password: SecretStr = SecretStr("jevora_dev_password")
     frontend_dir: Path = PROJECT_ROOT / "frontend"
     workspace_root: Path = PROJECT_ROOT / "workspace"
     vault_path: Path | None = None
@@ -39,7 +45,7 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:8000", "http://127.0.0.1:8000"]
     )
     public_base_url: str = "http://127.0.0.1:8000"
-    acting_brain_system_prompt: str = Field(default=DEFAULT_ACTING_BRAIN_SYSTEM_PROMPT, max_length=20_000)
+    acting_brain_system_prompt: str = Field(default=DEFAULT_ACTING_BRAIN_SYSTEM_PROMPT, max_length=400_000)
 
     # ---- auth ----------------------------------------------------------------
     auth_required: bool = False
@@ -58,6 +64,17 @@ class Settings(BaseSettings):
     github_auth_url: str = "https://github.com/login/oauth/authorize"
     github_token_url: str = "https://github.com/login/oauth/access_token"
     github_api_url: str = "https://api.github.com"
+
+    # ---- password reset email -------------------------------------------------
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_use_tls: bool = True
+    smtp_from_email: str = "no-reply@jevora.local"
+    smtp_from_name: str = "Jevora IDE"
+    password_reset_otp_ttl_minutes: int = 10
+    password_reset_max_attempts: int = 5
 
     # ---- secrets ---------------------------------------------------------------
     use_keyring: bool = True
@@ -145,8 +162,19 @@ class Settings(BaseSettings):
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:
-            return self.database_url
-        return f"sqlite+aiosqlite:///{(self.data_dir / 'jevora.db').as_posix()}"
+            url = self.database_url
+            if url.startswith("postgres://"):
+                return "postgresql+asyncpg://" + url[len("postgres://"):]
+            if url.startswith("postgresql://"):
+                return "postgresql+asyncpg://" + url[len("postgresql://"):]
+            return url
+        # Tests remain self-contained. All non-test deployments use Postgres by
+        # default so account, history, and settings data have one durable store.
+        if self.environment == "test":
+            return f"sqlite+aiosqlite:///{(self.data_dir / 'jevora.db').as_posix()}"
+        user = quote(self.postgres_user, safe="")
+        password = quote(self.postgres_password.get_secret_value(), safe="")
+        return f"postgresql+asyncpg://{user}:{password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
 
     @property
     def resolved_vault_path(self) -> Path:

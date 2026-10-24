@@ -20,22 +20,23 @@ class VaultConfig(BaseModel):
 
 @router.get("/config")
 async def get_config(user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
-    return await ctx.vault.status()
+    return await ctx.vault.status(user.id)
 
 
 @router.put("/config")
 async def put_config(body: VaultConfig, user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
-    return await ctx.vault.set_path(body.path)
+    return await ctx.vault.set_path(user.id, body.path)
 
 
 @router.get("/runs")
 async def vault_runs(user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
-    return {"vault": str(ctx.vault.path), "runs": await ctx.vault.list_runs()}
+    status = await ctx.vault.status(user.id)
+    return {"vault": status["path"], "runs": await ctx.vault.list_runs(user.id)}
 
 
 @router.get("/runs/{run_id}")
 async def vault_run(run_id: str, user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
-    record = await ctx.vault.read_run(run_id)
+    record = await ctx.vault.read_run(user.id, run_id)
     if record is None:
         raise NotFound("run note not found in vault")
     return {"record": record.model_dump(), "tree": build_tree(record)}

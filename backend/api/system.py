@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Query
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 
 from backend import __version__
 from backend.api.deps import Ctx, CurrentUser
@@ -99,7 +99,7 @@ async def usage(user: CurrentUser, ctx: Ctx, days: int = Query(30, ge=1, le=365)
         rows = await session.execute(
             select(column.label("key"), func.count(LLMCall.id), func.sum(LLMCall.prompt_tokens),
                    func.sum(LLMCall.completion_tokens), func.sum(LLMCall.cost_usd), func.avg(LLMCall.latency_ms),
-                   func.sum(func.iif(LLMCall.status == "error", 1, 0)))
+                   func.sum(case((LLMCall.status == "error", 1), else_=0)))
             .where(LLMCall.user_id == user.id, LLMCall.created_at >= since)
             .group_by(column).order_by(func.sum(LLMCall.cost_usd).desc())
         )

@@ -65,6 +65,25 @@ class RefreshToken(Base):
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
+class PasswordResetChallenge(Base):
+    """One-time email OTP challenge used to authorize a password reset."""
+
+    __tablename__ = "password_reset_challenges"
+    __table_args__ = (Index("ix_password_reset_email_created", "email", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_id("pwd_"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    code_salt: Mapped[str] = mapped_column(String(128))
+    code_hash: Mapped[str] = mapped_column(String(128))
+    reset_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 # --------------------------------------------------------------------------- providers / routing
 class Provider(Base):
     __tablename__ = "providers"
@@ -379,6 +398,19 @@ class SettingKV(Base):
     __tablename__ = "settings_kv"
 
     key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    value: Mapped[Any] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
+class UserSetting(Base):
+    """Settings owned by one authenticated user, never shared globally."""
+
+    __tablename__ = "user_settings"
+    __table_args__ = (UniqueConstraint("user_id", "key"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_id("ust_"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(200))
     value: Mapped[Any] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
