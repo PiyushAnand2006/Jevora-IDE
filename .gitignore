@@ -60,3 +60,9 @@ smoke-report.json
 # Electron build resources (icons are source assets, not generated images)
 !build/icon.ico
 !build/icon.png
+
+# Local model/eval caches and security-tool state
+.hf-cache/
+.mimosa/
+pip-build-env-*/
+pip-modern-metadata-*/
