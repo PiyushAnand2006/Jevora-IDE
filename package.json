@@ -1,0 +1,83 @@
+{
+  "name": "jevora-ide",
+  "productName": "Jevora IDE",
+  "version": "0.2.0",
+  "description": "Jevora IDE desktop shell — agent-native IDE backend (FastAPI) wrapped in Electron, with auto-update via GitHub releases",
+  "main": "electron/main.js",
+  "private": true,
+  "author": "Piyush Anand",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron .",
+    "smoke": "electron . --smoke-test",
+    "backend:build": "python packaging/build_backend.py",
+    "icon": "python packaging/make_icon.py",
+    "dist": "npm run backend:build && electron-builder --win nsis portable",
+    "pack": "npm run backend:build && electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.piyyushanand.jevora",
+    "productName": "Jevora IDE",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**",
+      "package.json",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-backend/jevora-backend",
+        "to": "jevora-backend"
+      },
+      {
+        "from": "frontend",
+        "to": "frontend"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "icon": "build/icon.ico",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Jevora IDE",
+      "artifactName": "Jevora-IDE-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Jevora-IDE-Portable-${version}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "PiyushAnand2006",
+      "repo": "Jevora-IDE"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

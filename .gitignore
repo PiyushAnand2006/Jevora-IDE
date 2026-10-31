@@ -46,3 +46,17 @@ pip-unpack-*/
 # Browser-control local artifacts
 .pw-browsers/
 .tmptmp/
+
+# Electron desktop shell
+node_modules/
+release/
+dist-backend/
+build-backend/
+.npm-cache/
+.electron-cache/
+.electron-builder-cache/
+smoke-report.json
+
+# Electron build resources (icons are source assets, not generated images)
+!build/icon.ico
+!build/icon.png
