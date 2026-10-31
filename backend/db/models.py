@@ -374,6 +374,33 @@ class VM(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
+class BrowserSession(Base):
+    """A browser-control session: a browser process (DCOM/IE or Playwright) attached to a VM/ sandbox
+    for screen observation and input automation, following the remote-control pattern observed in
+    Antigravity.exe (Delphi/DCOM browser automation via OLE/IDispatch)."""
+
+    __tablename__ = "browser_sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_id("bs_"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    vm_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("vms.id", ondelete="CASCADE"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(20))  # "dcom_ie", "dcom_chrome", "playwright", "desktop"
+    status: Mapped[str] = mapped_column(String(20), default="stopped")  # stopped | running | error
+    browser_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    clsid: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    host: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ws_endpoint: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    headless: Mapped[bool] = mapped_column(Boolean, default=False)
+    viewport_width: Mapped[int] = mapped_column(Integer, default=1280)
+    viewport_height: Mapped[int] = mapped_column(Integer, default=800)
+    allowed_hosts: Mapped[list[str]] = mapped_column(JSON, default=list)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
 class EscalationRequest(Base):
     __tablename__ = "escalation_requests"
 

@@ -149,6 +149,24 @@ class Settings(BaseSettings):
     desktop_control_enabled: bool = False
     playwright_server_image: str = "mcr.microsoft.com/playwright:v1.55.0-noble"
 
+    # ---- browser control (DCOM / remote-control pattern) --------------------------------
+    browser_control_enabled: bool = False  # gate the whole subsystem
+    browser_dcom_enabled: bool = False  # COM/DCOM browser automation (Antigravity-style)
+    browser_desktop_capture_enabled: bool = False  # desktop screenshot + input injection
+    browser_default_timeout_s: float = 60.0
+    browser_screenshot_quality: int = 85  # JPEG quality 1-100
+    browser_retry_interval_s: float = 1.0
+    browser_max_concurrent_sessions: int = 3
+    browser_allowed_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1", "host.docker.internal"])
+    # CLSIDs for browser automation objects (Windows). The canonical IE ProgID has no
+    # space; on builds where the IE COM server is disabled this fails at start() with
+    # a clear BrowserControlError instead of "Invalid class string".
+    browser_ie_clsid: str = "InternetExplorer.Application"
+    browser_ie_appid: str = "{0002DF05-0000-0000-C000-000000000046}"
+    browser_chrome_clsid: str | None = "Chrome HTML Document"
+    browser_chrome_path: str | None = None  # path to chrome.exe (falls back to registry detection)
+    browser_firefox_clsid: str | None = None
+
     @field_validator("data_dir", "workspace_root", "frontend_dir", mode="after")
     @classmethod
     def _absolute(cls, value: Path) -> Path:

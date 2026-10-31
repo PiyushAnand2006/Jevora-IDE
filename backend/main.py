@@ -20,6 +20,7 @@ from backend.api import (
     agents,
     attachments,
     auth,
+    browser_control,
     conversations,
     extras,
     mcp,
@@ -86,7 +87,7 @@ def create_app(settings: Settings | None = None,
         return response
 
     for module in (auth, providers, runs, conversations, agents, workspace, terminal, vms, vault, extras, mcp,
-                   attachments, system):
+                   attachments, system, browser_control):
         app.include_router(module.router)
 
     if settings.frontend_dir.exists():

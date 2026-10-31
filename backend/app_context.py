@@ -16,6 +16,7 @@ from backend.agents.service import AgentService
 from backend.agents.tools import build_registry
 from backend.agents.tools.base import ToolRegistry
 from backend.agents.tools.search import WebSearchService, WebSearchTool
+from backend.browser_control.session import SessionManager as BrowserSessionManager
 from backend.config import Settings
 from backend.core.crypto import SecretBox, load_secret_box
 from backend.core.email import EmailService
@@ -93,6 +94,9 @@ class AppContext:
         self.tools.register(WebSearchTool())
         self.screen = ScreenService(self)
         self.tools.register(ScreenTestTool())
+        from backend.browser_control.tool import BrowserControlTool
+        self.tools.register(BrowserControlTool())
+        self.extras["browser_sessions"] = BrowserSessionManager(self.settings, self.sessions)
         self.mcp = MCPManager(self)
         self.tools.add_provider(self.mcp.agent_tools)
 
@@ -125,6 +129,9 @@ class AppContext:
         await self.executor.stop()
         await self.orchestrator.stop()
         await self.screen.shutdown()
+        browser_sessions = self.extras.get("browser_sessions")
+        if browser_sessions is not None:
+            await browser_sessions.shutdown()
         await self.mcp.shutdown()
         await self.sandboxes.shutdown()
         await self.http.aclose()

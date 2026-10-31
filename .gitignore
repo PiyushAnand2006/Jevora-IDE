@@ -42,3 +42,7 @@ pip-ephem-wheel-cache-*/
 pip-install-*/
 pip-metadata-*/
 pip-unpack-*/
+
+# Browser-control local artifacts
+.pw-browsers/
+.tmptmp/
