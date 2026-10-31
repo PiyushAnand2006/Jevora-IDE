@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from backend.api.deps import Ctx, CurrentUser
 from backend.browser_control import SessionManager
+from backend.browser_control.driver import BrowserControlError, DomainNotAllowed
 from backend.browser_control.models import (
     AssertionSpec,
     BrowserAction,
@@ -22,7 +23,7 @@ from backend.browser_control.models import (
     BrowserSessionInfo,
     BrowserSessionUpdate,
 )
-from backend.core.errors import NotFound
+from backend.core.errors import AppError, NotFound
 
 router = APIRouter(prefix="/api/browser-control", tags=["browser-control"])
 
@@ -76,7 +77,13 @@ async def delete_session(session_id: str, user: CurrentUser, ctx: Ctx) -> dict[s
 @router.post("/sessions/{session_id}/start")
 async def start_session(session_id: str, body: StartBody, user: CurrentUser, ctx: Ctx) -> BrowserSessionInfo:
     manager: SessionManager = ctx.extras.get("browser_sessions")
-    return await manager.start_session(user.id, session_id, url=body.url, vm_id=body.vm_id)
+    try:
+        return await manager.start_session(user.id, session_id, url=body.url, vm_id=body.vm_id)
+    except DomainNotAllowed as exc:
+        raise AppError(str(exc), code="domain_not_allowed", status_code=400) from exc
+    except BrowserControlError as exc:
+        # e.g. the COM browser class is not launchable on this machine
+        raise AppError(str(exc), code="browser_start_failed", status_code=503) from exc
 
 
 @router.post("/sessions/{session_id}/stop")
@@ -94,7 +101,10 @@ async def perform_action(session_id: str, body: ActionBody, user: CurrentUser, c
 @router.get("/sessions/{session_id}/screenshot")
 async def screenshot(session_id: str, user: CurrentUser, ctx: Ctx) -> BrowserScreenshot:
     manager: SessionManager = ctx.extras.get("browser_sessions")
-    return await manager.take_screenshot(user.id, session_id)
+    try:
+        return await manager.take_screenshot(user.id, session_id)
+    except BrowserControlError as exc:
+        raise AppError(str(exc), code="session_not_running", status_code=409) from exc
 
 
 @router.post("/sessions/{session_id}/assert")
