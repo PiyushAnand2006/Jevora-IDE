@@ -119,7 +119,7 @@ async def run_events_sse(run_id: str, request: Request, user: CurrentUser, ctx: 
     run = await _owned_run(ctx, user.id, run_id)
     after = max(last_seq, _parse_last_seq(last_event_id))
     sub = ctx.events.subscribe(run_id=run_id)
-    backlog = ctx.events.history(run_id, after)
+    backlog = await ctx.events.history_durable(run_id, after)
 
     async def stream() -> AsyncIterator[str]:
         try:
@@ -186,7 +186,7 @@ async def run_stream(websocket: WebSocket, run_id: str) -> None:
     await websocket.accept()
     after = _parse_last_seq(websocket.query_params.get("last_seq"))
     sub = ctx.events.subscribe(run_id=run_id)
-    backlog = ctx.events.history(run_id, after)
+    backlog = await ctx.events.history_durable(run_id, after)
     try:
         # A fresh connection gets a status snapshot; a reconnect (last_seq) only gets newer events,
         # unless the run already finished and nothing newer is buffered.

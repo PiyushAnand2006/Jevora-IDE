@@ -128,6 +128,7 @@ class AppContext:
     async def aclose(self) -> None:
         await self.executor.stop()
         await self.orchestrator.stop()
+        await self.events.close()  # final durable-event flush
         await self.screen.shutdown()
         browser_sessions = self.extras.get("browser_sessions")
         if browser_sessions is not None:
@@ -167,6 +168,8 @@ async def build_context(settings: Settings, http_transport: httpx.AsyncBaseTrans
     router = ProviderRouter(settings, sessions, providers, metrics)
     local_user = await ensure_local_user(sessions)
     events = EventBus(metrics)
+    events.attach_persistence(sessions)  # durable stream replay (events table)
+    await events.restore()  # continue the global seq counter after a restart
     vault = VaultService(settings, sessions, events)
     approvals = ApprovalBroker()
     executor = RunExecutor(sessions, events, settings.max_concurrent_runs, metrics)

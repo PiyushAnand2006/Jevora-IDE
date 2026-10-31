@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -156,8 +157,13 @@ async def test_laya_is_lazy_batched_and_handles_missing_weights() -> None:
     with pytest.raises(EngineUnavailable):
         await broken.decide(questions[0], None)
     assert not await broken.available() and "could not load Laya weights" in (broken.describe()["load_error"] or "")
+
+
+def test_laya_unavailable_without_package(monkeypatch) -> None:
+    """When the laya package is missing, the engine reports unavailable (regardless of environment)."""
+    monkeypatch.setitem(sys.modules, "laya", None)  # `import laya` -> ImportError
     real = LayaEngine(model_id="convaiinnovations/laya")
-    assert await real.available() is False  # the laya package is not installed in this environment
+    assert asyncio.run(real.available()) is False
 
 
 # --------------------------------------------------------------------------- ensemble policy

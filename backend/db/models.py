@@ -383,7 +383,8 @@ class BrowserSession(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_id("bs_"))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    vm_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("vms.id", ondelete="CASCADE"), nullable=True, index=True)
+    vm_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("vms.id", ondelete="CASCADE"),
+                                              nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120))
     kind: Mapped[str] = mapped_column(String(20))  # "dcom_ie", "dcom_chrome", "playwright", "desktop"
     status: Mapped[str] = mapped_column(String(20), default="stopped")  # stopped | running | error
@@ -400,6 +401,26 @@ class BrowserSession(Base):
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     last_activity_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class EventRow(Base):
+    """Durable copy of bus events (per run) so stream replay survives restarts.
+
+    ``seq`` is the bus's global monotonic counter used as the primary key.
+    High-volume events with no replay value (``token.delta``, ``heartbeat``)
+    are never persisted.
+    """
+
+    __tablename__ = "events"
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    type: Mapped[str] = mapped_column(String(40))
+    call_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    parent_call_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ts: Mapped[str] = mapped_column(String(40))
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 class EscalationRequest(Base):
     __tablename__ = "escalation_requests"

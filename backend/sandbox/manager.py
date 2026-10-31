@@ -109,14 +109,16 @@ class SandboxManager:
             return existing
         kind = await self.resolve_kind()
         sandbox: Sandbox
+        allowlist = self.settings.sandbox_network_allowlist if network else []
         if kind == "docker":
             info = await self.docker_info()
             sandbox = DockerSandbox(container, workspace, await self.ensure_image(), runtime=self._runtime(info),
                                     cpus=self.settings.sandbox_cpus, memory=self.settings.sandbox_memory,
                                     pids_limit=self.settings.sandbox_pids_limit, network=network,
+                                    allowed_domains=allowlist,
                                     labels={"jevora.key": key})
         else:
-            sandbox = LocalSandbox(container, workspace)
+            sandbox = LocalSandbox(container, workspace, allowed_domains=allowlist)
         try:
             await sandbox.ensure_started()
         except SandboxError as exc:

@@ -30,6 +30,7 @@ class RunHandle:
     recorder: RunRecorder
     resume: Any = None  # None = fresh start; "restart" = resume from checkpoint; dict = escalation answer
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+    workspace_id: str | None = None  # set when the run holds its workspace exclusively
 
     @property
     def cancelled(self) -> bool:
@@ -61,6 +62,10 @@ class RunExecutor:
         self._handles: dict[str, RunHandle] = {}
         self._dispatcher: asyncio.Task[None] | None = None
         self._stopping = False
+        # per-workspace exclusivity: concurrent runs in one workspace would
+        # otherwise interleave their per-run diffs (see DECISIONS D28)
+        self._busy_ws: set[str] = set()
+        self._run_ws: dict[str, str | None] = {}  # run_id -> workspace_id cache
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self) -> None:
@@ -144,35 +149,71 @@ class RunExecutor:
         return True
 
     # ------------------------------------------------------------------ internals
+    def _user_key(self, user: str) -> tuple[int, int]:
+        return (self._active_by_user.get(user, 0), self._last_served.get(user, -1))
+
+    async def _workspace_of(self, run_id: str) -> str | None:
+        """Cached workspace lookup for dispatch-time exclusivity checks."""
+        if run_id in self._run_ws:
+            return self._run_ws[run_id]
+        async with self.sessions() as session:
+            ws = await session.scalar(select(Run.workspace_id).where(Run.id == run_id))
+        self._run_ws[run_id] = ws
+        return ws
+
     async def _dispatch_loop(self) -> None:
         while True:
             await self._wake.wait()
             self._wake.clear()
             while self._rr:
+                # Acquire BEFORE selecting: a run is only picked when a slot is
+                # actually free, so later-arriving fairer candidates can win.
                 await self._slots.acquire()
-                if not self._rr:
+                if self._stopping:
                     self._slots.release()
-                    break
+                    return
                 # Fair share: the user with the fewest active runs goes first; ties go to whoever
-                # was served least recently, so one user's backlog cannot starve another's.
-                user = min(self._rr, key=lambda u: (self._active_by_user.get(u, 0), self._last_served.get(u, -1)))
-                self._rr.remove(user)
+                # was served least recently, so one user's backlog cannot starve another's. A user
+                # whose head run waits on a busy workspace is skipped so other users keep moving.
+                picked: tuple[str, str, Any] | None = None
+                for user in sorted(self._rr, key=self._user_key):
+                    queue = self._pending.get(user)
+                    if not queue:
+                        # stale: cancelled while queued — prune and keep scanning
+                        self._pending.pop(user, None)
+                        with contextlib.suppress(ValueError):
+                            self._rr.remove(user)
+                        continue
+                    run_id, resume = queue[0]
+                    ws = await self._workspace_of(run_id)
+                    if ws is not None and ws in self._busy_ws:
+                        continue  # workspace busy: defer this user's head run
+                    picked = (user, run_id, resume)
+                    break
+                if picked is None:
+                    self._slots.release()
+                    break  # everything queued waits on a busy workspace; wake on release
+                user, run_id, resume = picked
                 queue = self._pending.get(user)
-                if not queue:
-                    self._pending.pop(user, None)
+                if not queue or queue[0][0] != run_id:  # cancelled while we checked
                     self._slots.release()
                     continue
-                run_id, resume = queue.popleft()
+                queue.popleft()
                 if queue:
                     self._rr.append(user)
                 else:
                     self._pending.pop(user, None)
+                    with contextlib.suppress(ValueError):
+                        self._rr.remove(user)
                 self._serve_counter += 1
                 self._last_served[user] = self._serve_counter
                 self._active_by_user[user] = self._active_by_user.get(user, 0) + 1
+                ws = self._run_ws.get(run_id)
+                if ws is not None:
+                    self._busy_ws.add(ws)
                 handle = RunHandle(run_id=run_id, user_id=user,
                                    recorder=RunRecorder(self.sessions, self.events, run_id, user, self.metrics),
-                                   resume=resume)
+                                   resume=resume, workspace_id=ws)
                 self._handles[run_id] = handle
                 self._tasks[run_id] = asyncio.create_task(self._execute(handle), name=f"run-{run_id}")
 
@@ -200,12 +241,16 @@ class RunExecutor:
         finally:
             self._tasks.pop(run_id, None)
             self._handles.pop(run_id, None)
+            self._run_ws.pop(run_id, None)
             self._active_by_user[handle.user_id] = max(0, self._active_by_user.get(handle.user_id, 1) - 1)
             self._slots.release()
+            if handle.workspace_id is not None:
+                self._busy_ws.discard(handle.workspace_id)
             if self.metrics is not None:
                 self.metrics.runs_active.dec()
             if not self._stopping:
                 await self._after_run(run_id)
+            self._wake.set()  # a freed workspace or slot may unblock queued runs
 
     async def _finalize_cancelled(self, handle: RunHandle) -> None:
         await handle.recorder.cancel_open_calls("cancelled by user")

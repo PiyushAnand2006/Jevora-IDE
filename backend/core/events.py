@@ -83,6 +83,20 @@ class Subscription:
 
 
 class EventBus:
+    """In-memory bus with optional SQLite persistence for stream replay.
+
+    Without persistence (tests, ephemeral use) behaviour is unchanged: replay
+    comes from the in-memory ring buffers, which are lost on restart. When
+    ``attach_persistence`` is called, every replay-worthy event is queued and a
+    background task flushes it to the ``events`` table (batched, ~0.5 s), the
+    seq counter continues from the persisted maximum on ``restore()``, and
+    ``history_durable`` merges DB rows with the live buffer so a reconnecting
+    client after a restart still gets a gap-free replay.
+    """
+
+    #: high-frequency events with no replay value after a restart
+    PERSIST_SKIP = frozenset({"token.delta", "heartbeat", "token.reset"})
+
     def __init__(self, metrics: Metrics | None = None, run_buffer: int = 20000, global_buffer: int = 5000) -> None:
         self.metrics = metrics
         self._seq = itertools.count(1)
@@ -92,9 +106,43 @@ class EventBus:
         self._global: deque[Event] = deque(maxlen=global_buffer)
         self._subs: list[Subscription] = []
         self._loop: asyncio.AbstractEventLoop | None = None
+        # persistence (attached via attach_persistence)
+        self._sessions: Any | None = None
+        self._pending: list[Event] = []
+        self._flusher: asyncio.Task[None] | None = None
+        self._restored = False
+
+    # ------------------------------------------------------------------ lifecycle
+    def attach_persistence(self, sessions: Any) -> None:
+        """Enable durable replay against an async_sessionmaker (events table)."""
+        self._sessions = sessions
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
+        if self._sessions is not None and self._flusher is None and not loop.is_closed():
+            self._flusher = loop.create_task(self._flush_loop(), name="event-flusher")
+
+    async def restore(self) -> None:
+        """Continue the global seq counter from the persisted maximum (call once at startup)."""
+        if self._sessions is None or self._restored:
+            return
+        from sqlalchemy import func, select
+
+        from backend.db.models import EventRow
+        async with self._sessions() as session:
+            max_seq = await session.scalar(select(func.max(EventRow.seq)))
+        self._seq = itertools.count((max_seq or 0) + 1)
+        self._restored = True
+        log.info("event bus restored (next seq=%d)", (max_seq or 0) + 1)
+
+    async def close(self) -> None:
+        """Stop the flusher after a final drain."""
+        task, self._flusher = self._flusher, None
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        await self._flush()
 
     @property
     def last_seq(self) -> int:
@@ -117,6 +165,8 @@ class EventBus:
                 buffer.append(event)
             if type != "token.delta":
                 self._global.append(event)
+            if self._sessions is not None and type not in self.PERSIST_SKIP:
+                self._pending.append(event)
             subs = list(self._subs)
         for sub in subs:
             if sub.matches(event):
@@ -138,9 +188,71 @@ class EventBus:
         else:
             loop.call_soon_threadsafe(lambda: self.publish(type, **kwargs))
 
+    # ------------------------------------------------------------------ persistence
+    async def _flush_loop(self) -> None:
+        while True:
+            await asyncio.sleep(0.5)
+            with contextlib.suppress(Exception):
+                await self._flush()
+
+    async def _flush(self) -> None:
+        if self._sessions is None:
+            return
+        with self._lock:
+            batch, self._pending = self._pending, []
+        if not batch:
+            return
+        from backend.db.models import EventRow
+        try:
+            async with self._sessions() as session:
+                session.add_all(EventRow(
+                    seq=e.seq, run_id=e.run_id, user_id=e.user_id, type=e.type,
+                    call_id=e.call_id, parent_call_id=e.parent_call_id, ts=e.ts, data=e.data,
+                ) for e in batch)
+                await session.commit()
+        except Exception:
+            log.exception("event flush failed (%d events dropped)", len(batch))
+
     def history(self, run_id: str, after_seq: int = 0) -> list[Event]:
         with self._lock:
             return [e for e in self._run_buffers.get(run_id, ()) if e.seq > after_seq]
+
+    async def history_durable(self, run_id: str, after_seq: int = 0) -> list[Event]:
+        """Replay across restarts: merge DB rows with the live in-memory buffer."""
+        mem = self.history(run_id, after_seq)
+        if self._sessions is None:
+            return mem
+        from sqlalchemy import select
+
+        from backend.db.models import EventRow
+        try:
+            async with self._sessions() as session:
+                rows = await session.scalars(
+                    select(EventRow).where(EventRow.run_id == run_id, EventRow.seq > after_seq)
+                    .order_by(EventRow.seq))
+                persisted = [Event(type=r.type, seq=r.seq, ts=r.ts, run_id=r.run_id, user_id=r.user_id,
+                                   call_id=r.call_id, parent_call_id=r.parent_call_id, data=r.data)
+                             for r in rows]
+        except Exception:
+            log.exception("event history load failed for run %s", run_id)
+            return mem
+        seen = {e.seq for e in mem}
+        return sorted([e for e in persisted if e.seq not in seen] + mem, key=lambda e: e.seq)
+
+    async def forget_run_persisted(self, run_id: str) -> None:
+        """Drop a run's events from memory and the durable store (run deletion)."""
+        self.forget_run(run_id)
+        if self._sessions is None:
+            return
+        from sqlalchemy import delete
+
+        from backend.db.models import EventRow
+        try:
+            async with self._sessions() as session:
+                await session.execute(delete(EventRow).where(EventRow.run_id == run_id))
+                await session.commit()
+        except Exception:
+            log.exception("event history delete failed for run %s", run_id)
 
     def global_history(self, user_id: str | None, after_seq: int = 0) -> list[Event]:
         with self._lock:

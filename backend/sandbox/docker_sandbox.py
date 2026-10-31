@@ -20,6 +20,7 @@ from backend.core.logging import get_logger
 from backend.core.paths import WorkspaceGuard
 from backend.core.proc import OutputCallback, ProcHandle, ProcResult, run_process
 from backend.sandbox.base import ExecResult, Sandbox, SandboxError
+from backend.sandbox.netfilter import DomainAllowProxy
 
 log = get_logger(__name__)
 DOCKERFILE = PROJECT_ROOT / "docker" / "sandbox.Dockerfile"
@@ -66,6 +67,7 @@ class DockerSandbox(Sandbox):
 
     def __init__(self, name: str, workspace: Path, image: str, *, runtime: str | None = None, cpus: float = 1.0,
                  memory: str = "1g", pids_limit: int = 256, network: bool = False,
+                 allowed_domains: list[str] | None = None,
                  labels: dict[str, str] | None = None) -> None:
         super().__init__(name, workspace)
         self.image = image
@@ -74,14 +76,24 @@ class DockerSandbox(Sandbox):
         self.memory = memory
         self.pids_limit = pids_limit
         self.network = network
+        self.allowed_domains = list(allowed_domains or [])
         self.labels = labels or {}
         self.guard = WorkspaceGuard(workspace)
         self._exec_handles: dict[str, ProcHandle] = {}
         self._start_lock = asyncio.Lock()
+        self._proxy: DomainAllowProxy | None = None
 
     async def _state(self) -> str | None:
         result = await docker("inspect", "-f", "{{.State.Status}}", self.name, timeout=20)
         return result.stdout.strip() if result.exit_code == 0 else None
+
+    async def _proxy_target(self) -> str:
+        """Start (once) the host-side allow-list proxy; return the container-side URL."""
+        if self._proxy is None:
+            from backend.sandbox.netfilter import DomainAllowProxy
+            self._proxy = DomainAllowProxy(self.allowed_domains)
+            await self._proxy.start()
+        return f"http://host.docker.internal:{self._proxy.listen_port}"
 
     async def ensure_started(self) -> None:
         async with self._start_lock:
@@ -102,6 +114,14 @@ class DockerSandbox(Sandbox):
             for key, value in self.labels.items():
                 args += ["--label", f"{key}={value}"]
             args += ["--network", "bridge" if self.network else "none"]
+            if self.network and self.allowed_domains:
+                # egress goes through the host-side allow-list proxy; plain
+                # sockets that ignore the proxy env are NOT filtered (KNOWN_LIMITS)
+                proxy_url = await self._proxy_target()
+                args += ["--add-host", "host.docker.internal:host-gateway",
+                         "-e", f"HTTP_PROXY={proxy_url}",
+                         "-e", f"HTTPS_PROXY={proxy_url}",
+                         "-e", "NO_PROXY=localhost,127.0.0.1,::1"]
             if self.runtime:
                 args += ["--runtime", self.runtime]
             if sys.platform != "win32" and hasattr(os, "getuid"):
@@ -158,10 +178,14 @@ class DockerSandbox(Sandbox):
     async def stop(self) -> None:
         await self.kill_all()
         await docker("rm", "-f", self.name, timeout=60)
+        if self._proxy is not None:
+            await self._proxy.stop()
+            self._proxy = None
 
     def describe(self) -> dict[str, Any]:
         data = super().describe()
         data.update({"image": self.image, "runtime": self.runtime or "runc", "network": self.network,
+                     "allowed_domains": self.allowed_domains,
                      "cpus": self.cpus, "memory": self.memory, "pids_limit": self.pids_limit,
                      "isolation": "gVisor" if self.runtime == "runsc" else "container"})
         return data

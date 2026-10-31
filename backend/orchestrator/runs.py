@@ -233,7 +233,7 @@ class RunService:
         for hook in self.delete_hooks:
             await hook(run_id)
         self.events.publish("run.deleted", user_id=user_id, run_id=run_id, data={})
-        self.events.forget_run(run_id)
+        await self.events.forget_run_persisted(run_id)
 
     async def cancel(self, user_id: str, run_id: str) -> dict[str, Any]:
         async with self.sessions() as session:
