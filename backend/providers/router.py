@@ -173,15 +173,13 @@ class ProviderRouter:
 
             def rank(pair: tuple[Provider, ModelBinding], prefs: list[str] = prefs) -> tuple[int, ...]:
                 provider, mb = pair
-                # health first: models whose last recent attempt failed go last,
-                # known-good models (more recent successes) go first — Auto then
-                # sends work to the best model that actually answers on this account
+                # tier fit decides; health only demotes models whose last recent
+                # attempt failed (dead models go last within their tier group)
                 health = stats.get((provider.id, mb.model), {})
                 last_err = 1 if health.get("last_status") == "error" else 0
-                ok = health.get("ok", 0)
                 tier_rank = prefs.index(mb.tier) if mb.tier in prefs else len(prefs)
                 kind_rank = KIND_ORDER.index(provider.kind) if provider.kind in KIND_ORDER else len(KIND_ORDER)
-                return (last_err, -ok, tier_rank, kind_rank, *preference_rank(mb.model))
+                return (tier_rank, kind_rank, last_err, *preference_rank(mb.model))
 
             ordered = sorted(pairs, key=rank)
             if category == "computer_use":

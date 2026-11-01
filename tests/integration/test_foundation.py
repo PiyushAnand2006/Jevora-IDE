@@ -21,7 +21,7 @@ async def test_health_and_features(client: httpx.AsyncClient) -> None:
     body = health.json()
     assert body["status"] == "ok" and body["database"]["ok"] is True
     features = (await client.get("/api/features")).json()
-    assert features["web_search"] is False
+    assert features["web_search"] is True  # keyless DuckDuckGo backend, enabled by default
 
 
 async def test_metrics_endpoint(client: httpx.AsyncClient) -> None:

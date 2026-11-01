@@ -21,7 +21,8 @@ from tests.support.servers import MockLLM, MockReply
 
 pytestmark = pytest.mark.e2e
 
-FLASK_APP = 'from flask import Flask\n\napp = Flask(__name__)\n\n\n@app.route("/")\ndef hello():\n    return "Hello, World!"\n'
+FLASK_APP = ('from flask import Flask\n\napp = Flask(__name__)\n\n\n@app.route("/")\n'
+             'def hello():\n    return "Hello, World!"\n')
 FLASK_TEST = ("from app import app\n\n\ndef test_hello():\n    client = app.test_client()\n"
               "    response = client.get('/')\n    assert response.status_code == 200\n"
               "    assert response.data == b'Hello, World!'\n")

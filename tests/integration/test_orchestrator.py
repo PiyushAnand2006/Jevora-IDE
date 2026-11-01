@@ -160,12 +160,22 @@ async def test_research_mode_cites_sources_without_web(harness: AppHarness, mock
     (harness.ctx.settings.workspace_root / "notes.md").write_text(
         "Jevora uses LangGraph for orchestration and Laya for decisions.\n", encoding="utf-8")
 
+    # hermetic browser fallback: the keyless search backend is stubbed so the
+    # test doesn't touch the live network
+    from backend.agents.tools.search import SearchResult
+
+    async def fake_search(query: str, k: int = 5):
+        return [SearchResult(title="Jevora docs", url="https://jevora.dev/docs",
+                             snippet="Jevora uses LangGraph for orchestration.")]
+
+    harness.ctx.web_search.search = fake_search
+
     def research(turn: Turn) -> MockReply | None:
         if turn.role == "router":
             return MockReply(content='{"title":"t","intent":"research","needs_code_changes":false,'
                                      '"needs_tests":false,"ui_work":false,"keywords":[],"risk":"low"}')
         if turn.role == "researcher":
-            assert "Web browsing is not available" in turn.task
+            assert "Using the configured Jevora Browser fallback" in turn.task
             return MockReply(content="## Findings\nJevora orchestrates with LangGraph [1]. I could not browse "
                                      "the web in this session.")
         return None

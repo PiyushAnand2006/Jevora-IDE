@@ -159,7 +159,8 @@ class MockLLM:
             for i, text in enumerate(inputs):
                 vec = [0.0] * 16
                 for token in str(text).lower().split():
-                    vec[int(hashlib.md5(token.encode()).hexdigest(), 16) % 16] += 1.0  # deterministic
+                    digest = hashlib.sha256(token.encode()).hexdigest()
+                    vec[int(digest, 16) % 16] += 1.0  # deterministic
                 data.append({"index": i, "embedding": vec})
             return JSONResponse({"data": data, "model": body.get("model")})
 

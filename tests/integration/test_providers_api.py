@@ -139,10 +139,11 @@ async def test_model_catalogue_and_router_config(client: httpx.AsyncClient, mock
 async def test_web_search_status_uses_saved_provider_capabilities(harness: AppHarness,
                                                                   mock_llm: MockLLM) -> None:
     custom = await add_mock_provider(harness.client, mock_llm)
-    unavailable = (await harness.client.get("/api/web-search/status",
-                                            params={"model": f"{custom['id']}:mock-pro"})).json()
-    assert unavailable["available"] is False
-    assert "does not support native web search" in unavailable["reason"]
+    fallback = (await harness.client.get("/api/web-search/status",
+                                         params={"model": f"{custom['id']}:mock-pro"})).json()
+    # models without native search are covered by the keyless browser fallback
+    assert fallback["available"] is True and fallback["mode"] == "jevora"
+    assert fallback["fallback"]["provider"] == "duckduckgo"
 
     openai = (await harness.client.post("/api/providers", json={
         "name": "OpenAI", "base_url": "https://api.openai.com/v1", "api_key": "sk-test",

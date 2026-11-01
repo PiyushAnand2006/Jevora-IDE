@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend.agents.config import AgentConfig
-from backend.agents.context import project_history
+from backend.agents.context import estimate_tokens, project_history
 from backend.agents.memory import MemoryService
 from backend.agents.pool import CallNode, RunScope, task_key
 from backend.agents.templates import BUILTIN_TEMPLATES, template
@@ -254,6 +254,33 @@ class AgentRuntime:
         names = {t.name for t in tools}
         bindings, chosen_category = await self.bindings_for(rc, config, task, category, web_search=web_search)
         system = await self._system_prompt(rc, config, task, sandbox_kind)
+
+        # Window-aware overhead: the assembled system prompt and tool schemas
+        # must fit inside ~40% of the context window so projected history and
+        # the reserve always have room. The largest tool specs are dropped
+        # first, then the system prompt is trimmed to what remains.
+        window = self.app.settings.context_window_tokens
+        overhead_budget = max(1024, int(window * 0.4))
+        sys_est = estimate_tokens(system)
+        tools_est = estimate_tokens(json.dumps([s.model_dump() for s in specs], ensure_ascii=False)) if specs else 0
+        if sys_est + tools_est > overhead_budget:
+            while specs and sys_est + tools_est > overhead_budget:
+                largest = max(specs, key=lambda s: estimate_tokens(json.dumps(s.model_dump(), ensure_ascii=False)))
+                specs = [s for s in specs if s is not largest]
+                tools_est = (estimate_tokens(json.dumps([s.model_dump() for s in specs], ensure_ascii=False))
+                             if specs else 0)
+            if sys_est + tools_est > overhead_budget:
+                # keep the head (shared brain) and the tail (per-agent role prompt
+                # carries the identity marker the mock/decision layer matches on)
+                allow = max(1024, (overhead_budget - tools_est) * 4)
+                if len(system) > allow:
+                    head = int(allow * 0.5)
+                    tail = allow - head
+                    system = (system[:head].rstrip() + "\n[system prompt trimmed to fit the context window]\n"
+                              + system[-tail:].lstrip())
+                log.info("context overhead trimmed for a %d-token window (tools=%d, system=%d chars)",
+                         window, len(specs), len(system))
+
         user_text = task if not context.strip() else f"{task}\n\n--- Context ---\n{context}"
         first: ChatMessage
         if include_images and rc.image_parts:

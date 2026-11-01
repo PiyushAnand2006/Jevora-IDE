@@ -100,12 +100,15 @@ async def test_attachments_upload_extract_and_limits(harness: AppHarness) -> Non
     stored = harness.ctx.settings.workspace_root / ".jevora" / "uploads"
     assert any(p.name.endswith("notes.md") for p in stored.iterdir())
 
-    exe = await client.post("/api/attachments", files=[("files", ("tool.exe", b"MZ\x90\x00", "application/x-msdownload"))])
+    exe = await client.post("/api/attachments",
+                            files=[("files", ("tool.exe", b"MZ\x90\x00", "application/x-msdownload"))])
     assert exe.status_code == 415
-    disguised = await client.post("/api/attachments", files=[("files", ("innocent.txt", b"MZ\x90\x00binary", "text/plain"))])
+    disguised = await client.post("/api/attachments",
+                                  files=[("files", ("innocent.txt", b"MZ\x90\x00binary", "text/plain"))])
     assert disguised.status_code == 415
     harness.ctx.settings.max_upload_mb = 1
-    huge = await client.post("/api/attachments", files=[("files", ("big.txt", b"a" * (1024 * 1024 + 10), "text/plain"))])
+    huge = await client.post("/api/attachments",
+                             files=[("files", ("big.txt", b"a" * (1024 * 1024 + 10), "text/plain"))])
     assert huge.status_code == 413
     assert not any(p.name.endswith("big.txt") for p in stored.iterdir())
     assert (await client.delete(f"/api/attachments/{note['id']}")).status_code == 200
@@ -193,12 +196,16 @@ async def test_third_party_plugin_tools_and_hooks(plugin_app: AppHarness, mock_l
 # --------------------------------------------------------------------------- features / web search
 async def test_features_and_web_search_flag(harness: AppHarness) -> None:
     features = (await harness.client.get("/api/features")).json()
-    assert features["web_search"] is False and features["oauth"] == {"google": False, "github": False}
+    assert features["oauth"] == {"google": False, "github": False}
     from backend.agents.tools.search import WebSearchUnavailable
 
+    # the keyless DuckDuckGo default means the flag alone doesn't guarantee a
+    # network call in tests — force the disabled state for the unavailable path
+    harness.ctx.settings.web_search_enabled = False
     with pytest.raises(WebSearchUnavailable):
         await harness.ctx.web_search.search("anything")
     harness.ctx.settings.web_search_enabled = True
+    harness.ctx.settings.web_search_provider = "searxng"
     harness.ctx.settings.searxng_url = "https://searx.test"
 
     def handler(request: httpx.Request) -> httpx.Response:
