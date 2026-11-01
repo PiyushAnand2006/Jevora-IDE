@@ -7,9 +7,9 @@
   "private": true,
   "author": "Piyush Anand",
   "scripts": {
-    "dev": "electron .",
-    "start": "electron .",
-    "smoke": "electron . --smoke-test",
+    "dev": "electron --no-sandbox .",
+    "start": "electron --no-sandbox .",
+    "smoke": "electron --no-sandbox . --smoke-test",
     "backend:build": "python packaging/build_backend.py",
     "icon": "python packaging/make_icon.py",
     "dist": "npm run backend:build && electron-builder --win nsis portable",

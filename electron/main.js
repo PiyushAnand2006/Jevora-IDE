@@ -10,6 +10,15 @@ const fs = require("node:fs");
 
 const { BackendManager, isDev } = require("./backend");
 
+// Chromium's sandbox broker aborts the whole process on some Windows setups
+// (security software / policy) with exit 3 before any app code can log —
+// `--no-sandbox` restores it (verified on this machine). The npm dev/start
+// scripts pass the switch; this env-var escape hatch covers packaged runs.
+// Trade-off: renderer process-isolation hardening is off when enabled.
+if (process.env.JEVORA_DISABLE_SANDBOX === "1") {
+  app.commandLine.appendSwitch("no-sandbox");
+}
+
 // optional isolated profile (also scopes the single-instance lock):
 // Jevora.exe --user-data-dir=C:\path
 const uddArg = process.argv.find((a) => a.startsWith("--user-data-dir="));
