@@ -139,17 +139,49 @@ class ProviderRouter:
             pairs = await self.service.bindings(user_id)
         return [(p, b) for p, b in pairs if is_chat_model(b.model)]
 
+    async def _health_stats(self, user_id: str) -> dict[tuple[str, str], dict[str, Any]]:
+        """Recent per-(provider, model) outcomes from llm_calls, so routing prefers
+        models that actually work on this account instead of re-trying ones that
+        404 or hang."""
+        from datetime import timedelta
+
+        from backend.core.ids import utcnow
+        since = utcnow() - timedelta(hours=48)
+        stats: dict[tuple[str, str], dict[str, Any]] = {}
+        async with self.sessions() as session:
+            rows = await session.execute(
+                select(LLMCall.provider_id, LLMCall.model, LLMCall.status, LLMCall.error)
+                .where(LLMCall.user_id == user_id, LLMCall.created_at >= since)
+                .order_by(LLMCall.created_at))
+        for provider_id, model, status, error in rows:
+            key = (provider_id, model)
+            st = stats.setdefault(key, {"ok": 0, "err": 0, "last_status": None, "last_error": ""})
+            if status == "ok":
+                st["ok"] += 1
+            else:
+                st["err"] += 1
+            st["last_status"] = status
+            st["last_error"] = (error or "")[:200]
+        return stats
+
     async def default_mapping(self, user_id: str) -> dict[str, list[Binding]]:
         pairs = await self._candidates(user_id)
+        stats = await self._health_stats(user_id)
         mapping: dict[str, list[Binding]] = {}
         for category in ALL_CATEGORIES:
             prefs = CATEGORY_TIER_PREFERENCE[category]
 
             def rank(pair: tuple[Provider, ModelBinding], prefs: list[str] = prefs) -> tuple[int, ...]:
                 provider, mb = pair
+                # health first: models whose last recent attempt failed go last,
+                # known-good models (more recent successes) go first — Auto then
+                # sends work to the best model that actually answers on this account
+                health = stats.get((provider.id, mb.model), {})
+                last_err = 1 if health.get("last_status") == "error" else 0
+                ok = health.get("ok", 0)
                 tier_rank = prefs.index(mb.tier) if mb.tier in prefs else len(prefs)
                 kind_rank = KIND_ORDER.index(provider.kind) if provider.kind in KIND_ORDER else len(KIND_ORDER)
-                return (tier_rank, kind_rank, *preference_rank(mb.model))
+                return (last_err, -ok, tier_rank, kind_rank, *preference_rank(mb.model))
 
             ordered = sorted(pairs, key=rank)
             if category == "computer_use":
@@ -167,6 +199,7 @@ class ProviderRouter:
         stored = await self.stored_mapping(user_id)
         providers = {p.id: p for p in await self.service.list_for(user_id)}
         binding_rows = {(p.id, b.model): b for p, b in await self.service.bindings(user_id)}
+        stats = await self._health_stats(user_id)
         effective: dict[str, list[Binding]] = {}
         for category in ALL_CATEGORIES:
             chain: list[Binding] = []
@@ -179,6 +212,8 @@ class ProviderRouter:
             for binding in defaults.get(category, []):
                 if all(b.ref != binding.ref for b in chain):
                     chain.append(binding)
+            # keep explicit order except: bindings that recently failed try last
+            chain.sort(key=lambda b: 1 if stats.get((b.provider_id, b.model), {}).get("last_status") == "error" else 0)
             effective[category] = chain
         return effective
 
@@ -407,10 +442,20 @@ class ProviderRouter:
             started = time.perf_counter()
 
             async def attempt(adapter: Any = adapter, request: ChatRequest = request,
-                              provider_id: str = binding.provider_id) -> ChatResponse:
+                              provider_id: str = binding.provider_id,
+                              model_name: str = binding.model) -> ChatResponse:
                 async with self._semaphore(provider_id):
-                    result: ChatResponse = await adapter.chat(request, on_delta if stream else None)
-                    return result
+                    # Total wall-clock cap: httpx's per-read timeout never fires on a
+                    # streaming response that keeps trickling bytes, which used to
+                    # hang a run for many minutes on a dead model.
+                    try:
+                        async with asyncio.timeout(self.settings.provider_call_timeout_s):
+                            result: ChatResponse = await adapter.chat(request, on_delta if stream else None)
+                            return result
+                    except TimeoutError:
+                        raise ProviderError(
+                            f"provider call exceeded {self.settings.provider_call_timeout_s:.0f}s "
+                            f"on {model_name}", retryable=False) from None
 
             async def retry_hook(n: int, exc: ProviderError, delay: float, binding: Binding = binding) -> None:
                 log.warning("retrying %s (attempt %d) after %.2fs: %s", binding.ref, n, delay, exc)

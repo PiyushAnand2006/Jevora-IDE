@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     ollama_autodiscover: bool = True
     provider_timeout_s: float = 120.0
     provider_models_timeout_s: float = 10.0
+    provider_call_timeout_s: float = 240.0  # total wall-clock cap per model call (streaming included)
     provider_max_retries: int = 3
     provider_backoff_base_s: float = 0.5
     provider_backoff_cap_s: float = 20.0
