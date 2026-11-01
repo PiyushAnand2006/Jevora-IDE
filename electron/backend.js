@@ -140,6 +140,13 @@ class BackendManager extends EventEmitter {
         ...process.env,
         ...sharedEnv,
         FRONTEND_DIR: path.join(process.resourcesPath || "", "frontend"),
+        // browser control ships with the app: bundled Chromium for playwright
+        PLAYWRIGHT_BROWSERS_PATH:
+          process.env.PLAYWRIGHT_BROWSERS_PATH ?? path.join(process.resourcesPath || "", "pw-browsers"),
+        // consumer installs have no Docker; agents and the terminal run on the
+        // host (documented trade-off). Docker takes over automatically when the
+        // daemon is present.
+        LOCAL_UNSAFE_EXEC: process.env.LOCAL_UNSAFE_EXEC ?? "true",
       },
     };
   }

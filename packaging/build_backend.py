@@ -40,6 +40,16 @@ HIDDEN = (
 )
 
 
+# The packaged app is governed by the Rules engine; the Laya real-weights stack
+# (torch/transformers/laya) is a dev-env workflow and would add ~450 MB, so it
+# is excluded — laya_engine handles the ImportError and reports unavailable.
+EXCLUDED = (
+    "torch", "torchvision", "torchaudio", "transformers", "tokenizers",
+    "safetensors", "huggingface_hub", "hf_xet", "laya", "unsloth",
+    "triton", "sympy", "networkx", "jinja2",
+)
+
+
 def pyinstaller_args() -> list[str]:
     """Literal, constant-derived argv for the frozen build."""
     return [
@@ -53,6 +63,11 @@ def pyinstaller_args() -> list[str]:
         f"--workpath={BUILD}",
         f"--specpath={PACK}",
         *(f"--hidden-import={m}" for m in HIDDEN),
+        *(f"--exclude-module={m}" for m in EXCLUDED),
+        # playwright's node driver + driver package must ship inside the frozen
+        # backend for browser control (screen testing, browser-control sessions)
+        "--collect-all", "playwright",
+        "--collect-all", "greenlet",
         # package data the backend reads at import/runtime (prompts, alembic)
         f"--add-data={ROOT / 'backend' / 'agents' / 'system_prompt.md'};backend/agents",
         f"--add-data={ROOT / 'backend' / 'db' / 'migrations'};backend/db/migrations",

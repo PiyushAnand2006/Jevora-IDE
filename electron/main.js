@@ -40,6 +40,7 @@ if (!app.requestSingleInstanceLock()) {
 let mainWindow = null;
 let tray = null;
 let backend = null; // BackendManager, set in bootstrap
+let startError = null; // last backend.start() failure, surfaced by the smoke report
 let updateApi = null; // set by setupAutoUpdate when packaged
 let quitting = false;
 
@@ -170,11 +171,13 @@ function bootstrap() {
     try {
       url = await backend.start();
     } catch (err) {
-      console.error(err?.message);
+      startError = String(err?.message || err);
+      console.error(startError);
     }
     if (!url) {
+      const message = startError || (backend.logs || "").slice(-1500) || "unknown error";
       const { dialog } = require("electron");
-      dialog.showErrorBox("Jevora IDE — backend failed to start", (backend.logs || "").slice(-1500) || "unknown error");
+      dialog.showErrorBox("Jevora IDE — backend failed to start", message);
       app.quit();
       return;
     }
@@ -231,6 +234,7 @@ if (process.argv.includes("--smoke-test")) {
       packaged: app.isPackaged,
       version: app.getVersion(),
       updateApi: Boolean(updateApi),
+      startError,
       logTail: (backend?.logs || "").slice(-800),
     };
     try {
