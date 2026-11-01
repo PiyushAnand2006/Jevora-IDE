@@ -10,6 +10,13 @@ const fs = require("node:fs");
 
 const { BackendManager, isDev } = require("./backend");
 
+// dev uses a deterministic in-repo profile: same data as the web server, and
+// no dependence on the OS profile dir's state (crashpad/GPU caches there have
+// caused silent aborts on this machine). Packaged builds keep the default.
+if (isDev()) {
+  app.setPath("userData", path.join(__dirname, "..", ".jevora-data", "electron"));
+}
+
 // Chromium's sandbox broker aborts the whole process on some Windows setups
 // (security software / policy) with exit 3 before any app code can log —
 // `--no-sandbox` restores it (verified on this machine). The npm dev/start
@@ -212,7 +219,11 @@ if (process.argv.includes("--smoke-test")) {
   app.whenReady().then(async () => {
     const deadline = Date.now() + 150_000;
     while (backend === null && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
-    while (backend?.state === "starting" && Date.now() < deadline) await new Promise((r) => setTimeout(r, 500));
+    // wait until the backend reaches a terminal lifecycle state (the manager
+    // starts in "stopped" and moves through "starting" to "ready"/"error")
+    while (backend && ["stopped", "starting"].includes(backend.state) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
     const report = {
       state: backend?.state,
       port: backend?.port,
