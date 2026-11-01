@@ -761,6 +761,24 @@ document.addEventListener('DOMContentLoaded', () => {
       this.escalationSlot = this.el.querySelector('.escalation-slot');
       this.cancelBtn = this.el.querySelector('.run-cancel-btn');
       this.cancelBtn.addEventListener('click', () => this.cancel());
+      // governance timeline + per-run diff (panels.js)
+      const metaRow = this.el.querySelector('.run-meta-row');
+      if (metaRow && this.runId) {
+        const tl = document.createElement('button');
+        tl.className = 'run-cancel-btn';
+        tl.type = 'button';
+        tl.textContent = 'Timeline';
+        tl.title = 'Agent tree with Jevora/Laya verdicts';
+        tl.addEventListener('click', () => window.jevoraOpenTimeline?.(this.runId));
+        const diffBtn = document.createElement('button');
+        diffBtn.className = 'run-cancel-btn';
+        diffBtn.type = 'button';
+        diffBtn.textContent = 'Changes';
+        diffBtn.title = 'Files changed in this run';
+        diffBtn.addEventListener('click', () => window.jevoraOpenDiff?.(this.runId));
+        metaRow.insertBefore(tl, this.cancelBtn);
+        metaRow.insertBefore(diffBtn, this.cancelBtn);
+      }
       this.treeBox.style.display = 'none';
     }
 
@@ -1241,6 +1259,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <button class="chip-btn" type="button" id="editFileBtn">Edit</button></div><pre></pre>`;
       viewer.querySelector('pre').textContent = file.content;
       $('editFileBtn').addEventListener('click', () => {
+        if (window.jevoraOpenEditor) { window.jevoraOpenEditor(path); return; }  // Monaco editor
         viewer.innerHTML = `<div class="drawer-muted" style="margin-bottom:6px"><strong>${escapeHtml(file.path)}</strong></div>
           <textarea class="drawer-textarea" id="fileEditor"></textarea>
           <div style="display:flex;gap:8px;margin-top:8px"><button class="chip-btn primary" type="button" id="saveFileBtn">Save</button><button class="chip-btn" type="button" id="cancelEditBtn">Cancel</button></div>`;

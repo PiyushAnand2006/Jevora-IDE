@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt pyinstaller
+
+      - name: Install desktop dependencies
+        run: |
+          npm install
+          npx playwright install chromium
+
+      - name: Stage bundled browsers for packaging
+        run: |
+          New-Item -ItemType Directory -Force -Path .pw-browsers | Out-Null
+          Copy-Item "$env:LOCALAPPDATA\ms-playwright\*" .pw-browsers -Recurse -Force
+
+      - name: Run tests
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///test.db
+        run: python -m pytest tests -q --ignore=tests/e2e --ignore=tests/integration/test_docker_sandbox.py --timeout=300
+
+      - name: Build backend + installers
+        run: npm run dist
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}\.pw-browsers
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release create $tag "release/Jevora-IDE-Setup-$($tag.TrimStart('v')).exe" "release/Jevora-IDE-Portable-$($tag.TrimStart('v')).exe" "release/latest.yml" --title "Jevora IDE $tag" --generate-notes --clobber
