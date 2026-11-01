@@ -175,7 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeAttachments = []; // { id, filename, kind, uploading }
   let webSearchEnabled = false;
   let webSearchStatus = { available: false, mode: 'none', reason: 'Select a configured model first.' };
-  let isSidebarOpen = true;
+  let isSidebarOpen = false; // Context & Tools panel hidden until the toolbar button opens it
   let conversationId = null;
   let selectedAgent = null; // { id, name }
   let engineName = 'Decision';
@@ -404,8 +404,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   // 3. Sidebar, tabs, mode dropdown
   // =========================================================================
-  if (sidebarToggleBtn) sidebarToggleBtn.classList.add('active');
   if (sidebarToggleBtn && sidebarColumn) {
+    // the Context & Tools panel starts hidden; the toolbar button opens it
+    sidebarColumn.classList.toggle('collapsed', !isSidebarOpen);
+    sidebarToggleBtn.classList.toggle('active', isSidebarOpen);
     sidebarToggleBtn.addEventListener('click', () => {
       isSidebarOpen = !isSidebarOpen;
       sidebarColumn.classList.toggle('collapsed', !isSidebarOpen);
