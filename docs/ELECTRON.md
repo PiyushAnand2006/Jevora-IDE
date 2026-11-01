@@ -56,16 +56,50 @@ profile dir as `smoke-report.json`).
 ## Build & release
 
 ```bash
-npm run icon         # regenerate build/icon.ico|png
+npm run icon         # regenerate build/icon.ico|png (renders the Jevora J logo SVG)
 npm run backend:build  # PyInstaller onedir -> dist-backend/jevora-backend/
 npm run dist         # backend build + electron-builder (NSIS + portable)
 ```
+
+What the build bundles:
+
+- the frozen backend (PyInstaller onedir) — the Laya real-weights stack
+  (torch/transformers/laya) is **excluded** to keep the install lean; the Rules
+  engine governs and `laya_engine` reports unavailable gracefully. Real-weights
+  Laya evaluation/fine-tuning stays a source-workflow (`backend.decision.eval`).
+- `chromium_headless_shell` — headless browser control works out of the box
+  (`PLAYWRIGHT_BROWSERS_PATH` points into the app resources).
+- the frontend and the Jevora J icon.
+
+Installer specifics (`build/installer.nsh`, included via `nsis.include`):
+
+- desktop/Start-Menu shortcuts launch with `--no-sandbox` — Chromium's sandbox
+  broker aborts before any code runs on some machines (security software);
+  the installer also sets `JEVORA_DISABLE_SANDBOX=1` (read by main.js) and
+  `LOCAL_UNSAFE_EXEC=true` so the bundled agents and terminal work without
+  Docker. Uninstall removes those values.
+- the packaged backend enables host execution only until a Docker daemon is
+  present (`resolve_kind` prefers Docker automatically).
 
 Artifacts land in `release/`:
 
 - `Jevora-IDE-Setup-<version>.exe` — NSIS installer
 - `Jevora-IDE-Portable-<version>.exe` — portable build
 - `latest.yml` — the update manifest electron-updater fetches
+
+### Publishing a release (auto-update)
+
+```bash
+npm version patch        # or minor/major; bumps package.json
+npm run dist
+git push origin main
+git tag v<version> && git push origin v<version>
+```
+
+Then attach the three artifacts to the GitHub release for the tag (web UI or
+`gh release create v<version> release/Jevora-IDE-Setup-<version>.exe
+release/Jevora-IDE-Portable-<version>.exe release/latest.yml` with notes).
+Installed apps pick it up automatically.
 
 ### Auto-update behavior (same policy as Emberling)
 
@@ -76,7 +110,7 @@ Artifacts land in `release/`:
 - Portable builds can't self-install — the banner links to the releases page.
 - Checks are quiet when offline; failures never spam the UI.
 
-To ship a release: bump `version` in `package.json`, run `npm run dist`,
-then create a GitHub release for the matching tag and upload
-`Jevora-IDE-Setup-<version>.exe`, `Jevora-IDE-Portable-<version>.exe`,
-and `latest.yml` from `release/`. Installed apps pick it up automatically.
+> Windows SmartScreen may warn on the first run of an unsigned build
+> ("Open File - Security Warning" → **Run**). Code-signing certificate
+> support is a follow-up; `signAndEditExecutable` is currently disabled
+> because signing tooling requires symlink privileges on the build host.

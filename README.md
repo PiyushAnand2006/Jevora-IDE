@@ -1,15 +1,48 @@
 # Jevora IDE
 
-An agent-native, local-first IDE backend: a pool of dynamically created agents
+An agent-native, local-first IDE: a pool of dynamically created agents
 (plan → code → test → verify) coordinated by a LangGraph orchestrator and
-checked by a non-generative decision layer, with screen-control for automatic
-testing, an Obsidian vault for portable history, and a desktop (Electron)
-shell with auto-update.
+governed by a non-generative decision layer (**Jevora** — Rules engine, with
+Laya as a shadow engine), with sandboxed execution, automatic screen testing
+via browser control, an Obsidian vault for portable history, and a Windows
+desktop app with auto-update.
 
-See [architecture.md](architecture.md) for the design, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-for how the backend is actually built, and [docs/](docs/) for subsystem docs.
+## Highlights
 
-## Quickstart (web)
+- **Agent orchestration** — planner → coder → tester → critic → verifier loops;
+  agents spawn subagents recursively, and every subagent's work is judged by the
+  decision layer on signed evidence (never self-reports). Unsatisfactory work is
+  re-dispatched with evidence-based feedback until it passes, then bounded by
+  escalation to the user.
+- **Auto model routing** — the router ranks saved provider models by recent
+  health and routes per mode: chat → best available model; build → classified
+  complexity → reasoning/fast tier; analysis → reasoning; research → retrieval.
+  Dead models (404/hang) are demoted automatically; every call has a hard
+  wall-clock deadline.
+- **Sandboxed execution** — Docker containers (CPU/memory/PID limits, dropped
+  capabilities, optional gVisor) with automatic fallback to host execution for
+  consumer installs; per-sandbox network allow-lists via a host-side proxy.
+- **Browser control** — Playwright headless Chromium sessions and OS-level
+  desktop capture for automatic UI testing; bundled with the desktop app.
+- **Web search** — keyless DuckDuckGo backend out of the box (Tavily, Brave and
+  SearXNG supported), native provider search when the model offers it.
+- **Local-first persistence** — SQLite via SQLAlchemy/Alembic; run history
+  mirrored to an Obsidian vault as plain markdown.
+
+## Download (Windows)
+
+Grab `Jevora-IDE-Setup-<version>.exe` from
+[GitHub Releases](https://github.com/PiyushAnand2006/Jevora-IDE/releases),
+install, and launch from the desktop icon. The installer bundles the backend,
+the UI, and a headless Chromium for browser control — no Python, Node or Docker
+required. Installed apps check GitHub for updates automatically and offer a
+one-click **Restart to update**.
+
+> On machines where a security product blocks Chromium's sandbox broker, the
+> shipped shortcuts pass `--no-sandbox` (the installer also sets
+> `JEVORA_DISABLE_SANDBOX=1`); renderer isolation is disabled on such installs.
+
+## Quickstart (web, from source)
 
 Requirements: Python 3.12.
 
@@ -31,18 +64,16 @@ Open http://127.0.0.1:8000 — the UI is served by the backend itself. Without
 > `sqlite+aiosqlite:///...` URL as above or start the compose stack
 > (`docker compose up -d postgres`).
 
-Enable the optional subsystems via environment (see `.env.example` for the
-full list):
+Optional subsystems (see `.env.example` for the full list):
 
 ```env
 BROWSER_CONTROL_ENABLED=true        # browser-control sessions (DCOM/Playwright/desktop)
-BROWSER_DCOM_ENABLED=true
-BROWSER_DESKTOP_CAPTURE_ENABLED=true
 SCREEN_ALLOWED_DOMAINS=["localhost","127.0.0.1"]
 SANDBOX_NETWORK_ALLOWLIST=["pypi.org","github.com"]   # sandbox egress filter
+WEB_SEARCH_ENABLED=true             # default; DuckDuckGo keyless backend
 ```
 
-## Desktop app (Electron)
+## Desktop app from source (Electron)
 
 ```bash
 npm install
@@ -64,5 +95,5 @@ Details, packaging, and the release/auto-update workflow:
 
 Subsystem docs: [API](docs/API.md) · [decisions](docs/DECISIONS.md) ·
 [plugins](docs/PLUGINS.md) · [browser control](docs/BROWSER_CONTROL_ARCHITECTURE.md) ·
-[email deployment](docs/DEPLOYMENT_EMAIL_SETUP.md) ·
-[known limits](docs/KNOWN_LIMITS.md).
+[desktop packaging](docs/ELECTRON.md) · [email deployment](docs/DEPLOYMENT_EMAIL_SETUP.md) ·
+[verification report](docs/E2E_REPORT.md) · [known limits](docs/KNOWN_LIMITS.md).
