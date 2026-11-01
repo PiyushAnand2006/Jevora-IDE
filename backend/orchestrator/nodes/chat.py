@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import or_, select
@@ -33,9 +34,25 @@ async def conversation_history(o: Orchestrator, conversation_id: str | None, use
         rows = list(await session.scalars(select(Message).where(
             Message.conversation_id == conversation_id, or_(Message.run_id.is_(None), Message.run_id != run_id))
             .order_by(Message.created_at, Message.id)))
-    # Projection happens after system/context/tool assembly in the runtime. Persisted
-    # contents remain complete, even for messages larger than the current window.
-    return [ChatMessage(role="assistant" if m.role == "assistant" else "user", content=m.content) for m in rows]
+    messages = [ChatMessage(role="assistant" if m.role == "assistant" else "user", content=m.content) for m in rows]
+    # context compaction: keep the most recent messages within the prompt budget
+    # so marathon conversations don't crowd out the system prompt and tools.
+    budget = o.app.settings.chat_history_budget_chars
+    total = sum(len(m.content if isinstance(m.content, str) else json.dumps(m.content, default=str)) for m in messages)
+    if total <= budget:
+        return messages
+    trimmed: list[ChatMessage] = []
+    kept = 0
+    for m in reversed(messages):
+        size = len(m.content if isinstance(m.content, str) else json.dumps(m.content, default=str))
+        if kept + size > budget and trimmed:
+            break
+        trimmed.insert(0, m)
+        kept += size
+    note = ChatMessage(role="user",
+                       content=f"[{len(messages) - len(trimmed)} earlier messages were compacted to stay within "
+                               "the context budget; the latest conversation continues below.]")
+    return [note, *trimmed]
 
 
 async def chat(o: Orchestrator, state: GraphState) -> dict[str, Any]:
