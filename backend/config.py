@@ -97,6 +97,7 @@ class Settings(BaseSettings):
 
     # ---- orchestration -----------------------------------------------------------
     escalation_threshold: float = 0.65
+    chat_history_budget_chars: int = 96_000  # chat prompt compaction budget (chars)
     iteration_ceiling: int = 6
     node_retry_cap: int = 3
     max_subagent_depth: int = 4

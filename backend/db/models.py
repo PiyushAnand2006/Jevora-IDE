@@ -403,6 +403,25 @@ class BrowserSession(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
+class ScheduledTask(Base):
+    """A recurring agent task: when due, the scheduler creates a run for the owner."""
+
+    __tablename__ = "scheduled_tasks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_id("sch_"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    prompt: Mapped[str] = mapped_column(Text)
+    mode: Mapped[str] = mapped_column(String(20), default="chat")
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=1440)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    next_run_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class EventRow(Base):
     """Durable copy of bus events (per run) so stream replay survives restarts.
 

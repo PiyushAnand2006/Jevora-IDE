@@ -39,6 +39,7 @@ from backend.plugins.registry import PluginRegistry
 from backend.providers.router import ProviderRouter
 from backend.providers.service import ProviderService
 from backend.sandbox.manager import SandboxManager
+from backend.scheduler import TaskScheduler
 from backend.screen_control.computer_use_agent import ScreenService, ScreenTestTool
 from backend.vault.service import VaultService
 
@@ -80,6 +81,7 @@ class AppContext:
     orchestrator: Orchestrator = field(init=False)
     screen: ScreenService = field(init=False)
     mcp: MCPManager = field(init=False)
+    scheduler: TaskScheduler = field(init=False)
 
     def __post_init__(self) -> None:
         self.memory = MemoryService(self)
@@ -88,6 +90,7 @@ class AppContext:
         self.agent_generator = AgentGenerator(self)
         self.plugins = PluginRegistry(self)
         self.orchestrator = Orchestrator(self)
+        self.scheduler = TaskScheduler(self)
         self.executor.runner = self.orchestrator.run
         self.runs.command_parser = parse_command
         self.runs.delete_hooks.append(self.orchestrator.forget)
@@ -116,6 +119,7 @@ class AppContext:
         await self.mcp.start_enabled()
         await self.executor.start()
         await self.executor.recover()
+        await self.scheduler.start()
         if self.settings.laya_enabled and self.settings.laya_preload:
             self.extras["laya_preload"] = asyncio.create_task(self._preload_laya())
 
@@ -126,6 +130,7 @@ class AppContext:
             self.extras["laya_preload_error"] = str(exc)
 
     async def aclose(self) -> None:
+        await self.scheduler.stop()
         await self.executor.stop()
         await self.orchestrator.stop()
         await self.events.close()  # final durable-event flush
