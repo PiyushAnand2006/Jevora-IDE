@@ -384,6 +384,34 @@ def _preview_args(args: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+async def _subagent_verdict(ctx: ToolContext, rc: RunContext, child: AgentConfig,
+                            result: AgentResult) -> str:
+    """Governance: Jevora/Laya judges the subagent's work on its evidence and the
+    verdict is returned to the assigning agent, which can re-dispatch with the
+    feedback until the result satisfies the task (the LangGraph loop bounds it)."""
+    try:
+        from backend.decision.schemas import Evidence
+        from backend.orchestrator.nodes.verifier import feedback_from
+
+        evidence = Evidence(items=result.evidence)
+        outcome = await ctx.app.decisions.confirm_completion(
+            {"mode": "subagent", "subagent": child.name, "status": result.status,
+             "has_output": bool(result.output.strip()), "evidence_items": len(result.evidence)},
+            evidence, recorder=rc.recorder, call_id=result.call_id)
+        res = outcome.result
+        if res.choice == "complete":
+            return (f"\n\nJevora verdict: ACCEPTED (engine={res.engine}, confidence={res.confidence:.2f}). "
+                    f"Reason: {res.reason}")
+        feedback = feedback_from(evidence, res.reason)
+        return (f"\n\nJevora verdict: NOT ACCEPTED (engine={res.engine}, confidence={res.confidence:.2f}). "
+                f"Reason: {res.reason}\nVerification feedback from tool evidence:\n{feedback}\n"
+                "If the work does not satisfy the task, re-dispatch spawn_subagent with a refined task and this "
+                "feedback as the context; otherwise fix the problems yourself with your tools.")
+    except Exception:
+        log.exception("subagent governance verdict failed for '%s' (non-fatal)", child.name)
+        return ""
+
+
 class SpawnSubagent(Tool):
     name = "spawn_subagent"
     description = ("Delegate a well-scoped subtask to a subagent and wait for its result. Use template for a "
@@ -440,6 +468,8 @@ class SpawnSubagent(Tool):
         summary = f"subagent '{child.name}' finished with status {result.status}"
         if result.files_changed:
             summary += f"; files changed: {', '.join(result.files_changed[:20])}"
-        return ToolResult(ok=result.status == "done", content=f"{summary}\n\n{result.output[:6000]}",
+        verdict = await _subagent_verdict(ctx, rc, child, result)
+        ok = result.status == "done"
+        return ToolResult(ok=ok, content=f"{summary}{verdict}\n\n{result.output[:6000]}",
                           evidence=result.evidence, files_changed=result.files_changed,
                           data={"call_id": result.call_id, "status": result.status, "model": result.model})
