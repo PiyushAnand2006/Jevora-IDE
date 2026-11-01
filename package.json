@@ -37,6 +37,10 @@
         "to": "frontend"
       },
       {
+        "from": ".pw-browsers/chromium_headless_shell-1248",
+        "to": "pw-browsers/chromium_headless_shell-1248"
+      },
+      {
         "from": "build/icon.png",
         "to": "icon.png"
       }
@@ -62,7 +66,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Jevora IDE",
-      "artifactName": "Jevora-IDE-Setup-${version}.${ext}"
+      "artifactName": "Jevora-IDE-Setup-${version}.${ext}",
+      "include": "build/installer.nsh"
     },
     "portable": {
       "artifactName": "Jevora-IDE-Portable-${version}.${ext}"
