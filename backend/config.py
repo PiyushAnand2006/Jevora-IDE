@@ -133,8 +133,8 @@ class Settings(BaseSettings):
     jev_api_key: SecretStr | None = None
 
     # ---- features -------------------------------------------------------------------
-    web_search_enabled: bool = False
-    web_search_provider: Literal["tavily", "brave", "searxng"] = "searxng"
+    web_search_enabled: bool = True
+    web_search_provider: Literal["tavily", "brave", "searxng", "duckduckgo"] = "duckduckgo"
     tavily_api_key: SecretStr | None = None
     brave_api_key: SecretStr | None = None
     searxng_url: str | None = None

@@ -7,6 +7,7 @@ server-side search backend.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -40,8 +41,8 @@ class WebSearchService:
 
     def status(self) -> dict[str, Any]:
         s = self.settings
-        configured = {"tavily": bool(s.tavily_api_key), "brave": bool(s.brave_api_key),
-                      "searxng": bool(s.searxng_url)}.get(s.web_search_provider, False)
+        configured = {"tavily": bool(s.tavily_api_key), "brave": bool(s.brave_api_key), "searxng": bool(s.searxng_url),
+                      "duckduckgo": True}.get(s.web_search_provider, False)
         return {"enabled": s.web_search_enabled, "provider": s.web_search_provider, "configured": configured}
 
     async def search(self, query: str, k: int = 5) -> list[SearchResult]:
@@ -53,6 +54,8 @@ class WebSearchService:
                 return await self._tavily(query, k)
             if provider == "brave":
                 return await self._brave(query, k)
+            if provider == "duckduckgo":
+                return await self._duckduckgo(query, k)
             return await self._searxng(query, k)
         except httpx.HTTPError as exc:
             raise WebSearchUnavailable(f"{provider} search failed: {type(exc).__name__}") from exc
@@ -89,6 +92,52 @@ class WebSearchService:
         response.raise_for_status()
         return [SearchResult(title=r.get("title", ""), url=r.get("url", ""), snippet=r.get("content", "")[:800])
                 for r in response.json().get("results", [])][:k]
+
+    async def _duckduckgo(self, query: str, k: int) -> list[SearchResult]:
+        """Keyless backend via the DuckDuckGo HTML endpoint.
+
+        Guard rails (server-side fetch policy): the request goes only to
+        ``https://html.duckduckgo.com`` — the URL scheme and host are asserted,
+        and every resolved address is checked against private/reserved ranges
+        before connecting.
+        """
+        import ipaddress
+        import socket
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        url = "https://html.duckduckgo.com/html/"
+        parsed = urlparse(url)
+        assert parsed.scheme == "https" and parsed.hostname == "html.duckduckgo.com", "unexpected search host"
+        for _family, _type, _proto, _canonname, sockaddr in socket.getaddrinfo(parsed.hostname, 443):
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local or ip.is_multicast:
+                raise WebSearchUnavailable("search host resolved to a non-public address; refusing to connect")
+        response = await self.client.post(url, timeout=20, data={"q": query, "kl": "wt-wt"},
+                                          headers={"User-Agent": "Mozilla/5.0 (Jevora IDE web-search)"})
+        response.raise_for_status()
+        html = response.text
+        results: list[SearchResult] = []
+        for match in re.finditer(r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', html, re.S):
+            href = match.group(1)
+            if "uddg=" in href:  # DDG redirect: /l/?uddg=<encoded url>&...
+                href = unquote(parse_qs(urlparse(href.replace("&amp;", "&")).query).get("uddg", [""])[0])
+            title = re.sub(r"<[^>]+>", "", match.group(2)).strip()
+            if not title or href.startswith("javascript:"):
+                continue
+            results.append(SearchResult(title=title, url=href, snippet=""))
+            if len(results) >= k:
+                break
+        # snippets live on sibling anchors; attach them by proximity in the raw html
+        for r in results:
+            idx = html.find(r.title)
+            if idx >= 0:
+                snippet_match = re.search(r'class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
+                                          html[idx:idx + 2000], re.S)
+                if snippet_match:
+                    r.snippet = re.sub(r"<[^>]+>", "", snippet_match.group(1)).strip()[:800]
+        if not results:
+            raise WebSearchUnavailable("duckduckgo returned no parsable results (page format may have changed)")
+        return results
 
 
 class WebSearchTool(Tool):
