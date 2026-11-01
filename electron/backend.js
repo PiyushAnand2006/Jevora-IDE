@@ -112,6 +112,10 @@ class BackendManager extends EventEmitter {
       BROWSER_DESKTOP_CAPTURE_ENABLED: process.env.BROWSER_DESKTOP_CAPTURE_ENABLED ?? "true",
     };
     if (isDev()) {
+      // dev shares the repo's local data so the desktop app and a separately
+      // started web server see the same users/runs (the packaged app uses the
+      // OS profile dir instead)
+      const dataDir = path.join(repoRoot(), ".jevora-data");
       return {
         cmd: venvPython(),
         // literal argv; variability travels only through env
@@ -120,6 +124,9 @@ class BackendManager extends EventEmitter {
         env: {
           ...process.env,
           ...sharedEnv,
+          DATA_DIR: dataDir,
+          WORKSPACE_ROOT: path.join(repoRoot(), "workspace"),
+          DATABASE_URL: process.env.DATABASE_URL ?? `sqlite+aiosqlite:///${dataDir.replace(/\\/g, "/")}/jevora.db`,
           PYTHONPATH: repoRoot(),
           FRONTEND_DIR: path.join(repoRoot(), "frontend"),
         },
