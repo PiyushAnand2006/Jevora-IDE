@@ -455,31 +455,7 @@
         row.appendChild(btn);
       }
     });
-    // agent import in the agent tab
-    const importInput = document.createElement("input");
-    importInput.type = "file";
-    importInput.accept = ".json";
-    importInput.style.display = "none";
-    importInput.addEventListener("change", () => {
-      if (importInput.files[0]) window.jevoraImportAgent(importInput.files[0]);
-      importInput.value = "";
-    });
-    document.body.appendChild(importInput);
-    const agentEmpty = document.getElementById("agentEmptyState");
-    if (agentEmpty) {
-      const imp = el("button", "jv-btn jv-btn-secondary", "Import agent (.json)");
-      imp.addEventListener("click", () => importInput.click());
-      agentEmpty.appendChild(imp);
-    }
-    // export buttons on saved agents
-    document.querySelectorAll(".agent-list-item, .agent-item").forEach((item) => {
-      if (item.querySelector(".jv-export")) return;
-      const id = item.getAttribute("data-agent-id") || item.getAttribute("data-id");
-      if (!id) return;
-      const exp = el("button", "jv-mini-btn jv-export", "⬇");
-      exp.title = "Export agent as JSON";
-      exp.addEventListener("click", () => window.jevoraExportAgent(id));
-      item.appendChild(exp);
-    });
+    // agent import lives in the Agent tab (app.js adds an Import button next to
+    // export on each agent card); nothing to wire here
   }
 })();
