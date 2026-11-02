@@ -1086,6 +1086,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // 6. Agent tab: saved agents + natural-language generation
   // =========================================================================
   const agentList = $('agentList');
+  const agentImportInput = document.getElementById('agentImportInput');
+  if (agentImportInput) agentImportInput.addEventListener('change', () => {
+    if (agentImportInput.files[0]) window.jevoraImportAgent?.(agentImportInput.files[0]);
+    agentImportInput.value = '';
+  });
   const agentEmptyState = $('agentEmptyState');
 
   function selectAgent(agent) {
@@ -1104,16 +1109,29 @@ document.addEventListener('DOMContentLoaded', () => {
     try { agents = await api.get('/api/agents'); } catch (_) { return; }
     agentList.hidden = agents.length === 0;
     if (agentEmptyState) agentEmptyState.style.display = agents.length ? 'none' : '';
+    if (agentImportInput) agentImportInput.style.display = agents.length ? '' : 'none';
     agentList.innerHTML = '';
     agents.forEach((agent) => {
       const card = document.createElement('div');
       card.className = `agent-card${selectedAgent?.id === agent.id ? ' selected' : ''}`;
+      card.dataset.agentId = agent.id;
+      card.dataset.perms = JSON.stringify(agent.tool_permissions || []);
       card.innerHTML = `<div class="ac-top"><span class="ac-dot ${agent.status === 'running' ? 'running' : ''}"></span>
         <span class="ac-name">${escapeHtml(agent.name)}</span><span class="drawer-muted">${escapeHtml(agent.template || 'custom')}</span></div>
         <div class="ac-desc">${escapeHtml(agent.description || agent.config?.system_prompt || '')}</div>
         <div class="ac-actions"><button class="chip-btn primary" type="button" data-act="use">Use</button>
+        <button class="chip-btn" type="button" data-act="perms">Permissions</button>
+        <button class="chip-btn" type="button" data-act="export">Export</button>
         <button class="chip-btn danger" type="button" data-act="delete">Delete</button></div>`;
       card.querySelector('[data-act="use"]').addEventListener('click', (e) => { e.stopPropagation(); selectAgent({ id: agent.id, name: agent.name }); });
+      card.querySelector('[data-act="perms"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.jevoraEditPermissions?.(agent.id, agent.name, agent.tool_permissions || []);
+      });
+      card.querySelector('[data-act="export"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.jevoraExportAgent?.(agent.id);
+      });
       card.querySelector('[data-act="delete"]').addEventListener('click', async (e) => {
         e.stopPropagation();
         try {
