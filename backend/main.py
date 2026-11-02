@@ -30,6 +30,7 @@ from backend.api import (
     scheduled,
     system,
     terminal,
+    usage,
     vault,
     vms,
     workspace,
@@ -89,7 +90,7 @@ def create_app(settings: Settings | None = None,
         return response
 
     for module in (auth, providers, runs, conversations, agents, workspace, terminal, vms, vault, extras, mcp,
-                   attachments, system, browser_control, scheduled, projects):
+                   attachments, system, browser_control, scheduled, projects, usage):
         app.include_router(module.router)
 
     if settings.frontend_dir.exists():
