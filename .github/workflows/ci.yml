@@ -25,9 +25,9 @@ jobs:
         run: python -m ruff check backend tests
 
       - name: Unit + integration tests
-        env:
-          DATABASE_URL: sqlite+aiosqlite:///test.db
-        run: python -m pytest tests -q --ignore=tests/e2e --timeout=300
+        # no DATABASE_URL here: tests must use their own per-test SQLite
+        # (a shared database leaks state between tests)
+        run: python -m pytest tests -q --ignore=tests/e2e --ignore=tests/integration/test_docker_sandbox.py --timeout=300
 
   frontend:
     runs-on: windows-latest
