@@ -37,8 +37,11 @@ if sys.platform == "win32":  # pragma: no cover - platform specific
         def __init__(self, argv: list[str], cwd: str | None, env: dict[str, str] | None, cols: int, rows: int) -> None:
             from winpty import PtyProcess
 
-            cmd = subprocess.list2cmdline(argv)
-            self._proc = PtyProcess.spawn(cmd, cwd=cwd, env=env, dimensions=(rows, cols))
+            # Pass the argv list, never a joined string: pywinpty splits strings
+            # with shlex(posix=False), which keeps the quotes around paths with
+            # spaces (e.g. "C:\Program Files\PowerShell\7\pwsh.exe") and then
+            # fails to resolve the executable.
+            self._proc = PtyProcess.spawn(argv, cwd=cwd, env=env, dimensions=(rows, cols))
 
         def read(self) -> str:
             try:
