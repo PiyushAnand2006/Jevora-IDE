@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -56,13 +57,18 @@ def test_terminal_pty_roundtrip(tmp_path: Path) -> None:
         assert ready["type"] == "ready" and ready["sandbox"]["kind"] == "local"
         ws.send_json({"type": "resize", "cols": 120, "rows": 40})
         ws.send_json({"type": "stdin", "data": "echo jevora-pty-ok\r"})
+        # An interactive PowerShell renders typed characters through PSReadLine
+        # with ANSI cursor codes interleaved, so match on ANSI-stripped output.
+        ansi = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
         seen = ""
         deadline = time.time() + 20
-        while "jevora-pty-ok" not in seen.replace("echo jevora-pty-ok", "") and time.time() < deadline:
+        while time.time() < deadline:
             message = ws.receive_json()
             if message["type"] == "stdout":
                 seen += message["data"]
-        assert "jevora-pty-ok" in seen.replace("echo jevora-pty-ok", "")
+                if "jevora-pty-ok" in ansi.sub("", seen).replace("echo jevora-pty-ok", ""):
+                    break
+        assert "jevora-pty-ok" in ansi.sub("", seen).replace("echo jevora-pty-ok", "")
 
 
 def test_terminal_reports_unavailable_sandbox(tmp_path: Path) -> None:

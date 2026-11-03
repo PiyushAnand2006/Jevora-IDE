@@ -141,9 +141,12 @@ async def test_git_tools(harness: AppHarness) -> None:
 
 async def test_risky_command_requires_approval(harness: AppHarness) -> None:
     harness.ctx.settings.approval_policy = "ask_on_risk"
+    # A recursive delete the host shell can always run: cmd's rmdir is built in,
+    # while `rm` depends on a Unix toolchain being on PATH.
+    delete_build = "rmdir /s /q build" if sys.platform == "win32" else "rm -rf build"
     ctx = await tool_ctx(harness)
     (ctx.workspace / "build").mkdir()
-    task = asyncio.create_task(invoke(harness, ctx, "run_command", command="rm -rf build"))
+    task = asyncio.create_task(invoke(harness, ctx, "run_command", command=delete_build))
     for _ in range(100):
         run = (await harness.client.get(f"/api/runs/{ctx.run_id}")).json()
         if run["status"] == "awaiting_user":
@@ -158,7 +161,7 @@ async def test_risky_command_requires_approval(harness: AppHarness) -> None:
     assert (ctx.workspace / "build").exists()
     assert (await harness.client.get(f"/api/runs/{ctx.run_id}")).json()["status"] == "running"
 
-    task = asyncio.create_task(invoke(harness, ctx, "run_command", command="rm -rf build"))
+    task = asyncio.create_task(invoke(harness, ctx, "run_command", command=delete_build))
     for _ in range(100):
         if (await harness.client.get(f"/api/runs/{ctx.run_id}")).json()["status"] == "awaiting_user":
             break
