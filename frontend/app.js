@@ -44,6 +44,38 @@ document.addEventListener('DOMContentLoaded', () => {
     return sameDay ? `Today, ${time}` : `${date.toLocaleDateString()} ${time}`;
   }
 
+  /** Compact relative time for sidebar chat rows ("2m", "3h", "5d"…). */
+  function relTime(iso) {
+    if (!iso) return '';
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '';
+    const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+    if (seconds < 60) return 'now';
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    const days = Math.round(hours / 24);
+    if (days < 7) return `${days}d`;
+    const weeks = Math.round(days / 7);
+    if (weeks < 5) return `${weeks}w`;
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+
+  // Category marks so every history surface shows which mode a chat belongs to.
+  const MODE_BADGES = {
+    chat: { label: 'Chat', cls: 'b-chat' },
+    build: { label: 'Build', cls: 'b-build' },
+    research: { label: 'Research', cls: 'b-research' },
+    analysis: { label: 'Analysis', cls: 'b-analysis' },
+    general: { label: 'Research', cls: 'b-research' }, // legacy alias
+  };
+
+  function modeBadge(mode) {
+    const badge = MODE_BADGES[(mode || 'chat').toLowerCase()] || MODE_BADGES.chat;
+    return `<span class="mode-badge ${badge.cls}">${badge.label}</span>`;
+  }
+
   function inlineMarkdown(text) {
     return text
       .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -130,6 +162,10 @@ document.addEventListener('DOMContentLoaded', () => {
     patch(path, body) { return this.request('PATCH', path, body ?? {}); },
     del(path) { return this.request('DELETE', path); },
   };
+  // panels.js / settings.js load after app.js and reuse this client (they were
+  // dead code before it was exposed on window).
+  window.api = api;
+  window.jevoraToast = showToast;
 
   function wsUrl(path, params = {}) {
     const url = new URL(path, window.location.href);
@@ -280,6 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (conversationRenameBtn) conversationRenameBtn.hidden = !conversationId;
     if (conversationBranchBtn) conversationBranchBtn.hidden = !conversationId;
     if (conversationDeleteBtn) conversationDeleteBtn.hidden = !conversationId;
+    if (conversationMoveBtn) { conversationMoveBtn.disabled = busy; conversationMoveBtn.hidden = !conversationId; }
     document.querySelectorAll('[data-conversation-id]').forEach((row) => {
       const selected = row.dataset.conversationId === conversationId;
       row.classList.toggle('selected', selected);
@@ -324,6 +361,29 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) { showToast(`Delete failed: ${error.message}`); }
   });
 
+  const conversationMoveBtn = $('conversationMoveBtn');
+  conversationMoveBtn?.addEventListener('click', async () => {
+    if (!conversationId || conversationMoveBtn.disabled) return;
+    await loadProjects();
+    if (!projectsCache.length) { showToast('Create a project first (Projects → +)'); return; }
+    const list = projectsCache.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
+    const answer = window.prompt(`Move this chat to which project?\n\n${list}\n\nEnter a number (empty = remove from its project):`, '1');
+    if (answer === null) return;
+    const trimmed = answer.trim();
+    let projectId = null;
+    if (trimmed) {
+      const index = parseInt(trimmed, 10) - 1;
+      if (Number.isNaN(index) || !projectsCache[index]) { showToast('Invalid selection'); return; }
+      projectId = projectsCache[index].id;
+    }
+    try {
+      await api.patch(`/api/conversations/${encodeURIComponent(conversationId)}`,
+        { project_id: projectId, detach_project: !projectId });
+      showToast(projectId ? 'Chat moved into the project' : 'Chat removed from its project');
+      refreshConversationLists();
+    } catch (error) { showToast(`Move failed: ${error.message}`); }
+  });
+
   function beginConversationSession(clearStored = true) {
     sessionRevision += 1;
     activeRunViews.forEach((view) => view.dispose());
@@ -361,14 +421,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderProfile() {
-    if (!currentUser || currentUser.is_local) {
+    if (!currentUser) {
       if (profileChip) profileChip.hidden = true;
       return;
     }
+    // The chip stays visible in local mode too: its menu hosts Settings (usage,
+    // sandbox runtime) even before the user signs in.
     if (profileChip && profileAvatar) {
       profileChip.hidden = false;
-      profileAvatar.textContent = initials(currentUser);
-      profileChip.title = `${currentUser.name || ''} ${currentUser.email ? `<${currentUser.email}>` : ''}`.trim();
+      profileAvatar.textContent = currentUser.is_local ? 'J' : initials(currentUser);
+      profileChip.title = currentUser.is_local ? 'Local workspace — not signed in'
+        : `${currentUser.name || ''} ${currentUser.email ? `<${currentUser.email}>` : ''}`.trim();
+    }
+    if (currentUser.is_local) {
+      if (signInWrap) signInWrap.innerHTML = `
+        <div class="sidebar-user">
+          <span class="su-avatar">J</span>
+          <div class="su-text"><div class="su-name">Local workspace</div>
+          <div class="su-email">Not signed in</div></div>
+          <button class="su-signout" type="button" id="localSignInBtn">Sign in</button>
+        </div>`;
+      $('localSignInBtn')?.addEventListener('click', () => { window.location.href = 'auth.html'; });
+      return;
     }
     if (signInWrap) {
       signInWrap.innerHTML = `
@@ -392,10 +466,18 @@ document.addEventListener('DOMContentLoaded', () => {
       menu.className = 'profile-menu';
       menu.style.top = `${rect.bottom + 8}px`;
       menu.style.right = `${window.innerWidth - rect.right}px`;
-      menu.innerHTML = `<div class="pm-name">${escapeHtml(currentUser?.name || '')}</div>
-        <div class="pm-email">${escapeHtml(currentUser?.email || '')}</div>
-        <button class="chip-btn" type="button">Sign out</button>`;
-      menu.querySelector('button').addEventListener('click', signOut);
+      menu.innerHTML = `<div class="pm-name">${escapeHtml(currentUser?.is_local ? 'Local workspace' : currentUser?.name || '')}</div>
+        <div class="pm-email">${escapeHtml(currentUser?.is_local ? 'Not signed in' : currentUser?.email || '')}</div>
+        <button class="chip-btn pm-settings" type="button">Settings &amp; usage</button>
+        <button class="chip-btn" type="button">${currentUser?.is_local ? 'Sign in' : 'Sign out'}</button>`;
+      menu.querySelector('.pm-settings').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        menu.remove();
+        window.jevoraOpenSettings?.();
+      });
+      const actionBtn = [...menu.querySelectorAll('button')].find((b) => !b.classList.contains('pm-settings'));
+      actionBtn.addEventListener('click', currentUser?.is_local
+        ? () => { window.location.href = 'auth.html'; } : signOut);
       document.body.appendChild(menu);
       setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0);
     });
@@ -415,6 +497,21 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(isSidebarOpen ? 'Context & Tools panel opened' : 'Context & Tools panel hidden');
     });
   }
+
+  // Mobile: the left sidebar slides in over the content (hamburger toggle).
+  const mobileNavBtn = $('mobileNavBtn');
+  mobileNavBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.body.classList.toggle('mobile-nav-open');
+  });
+  $('sidebarProjects')?.addEventListener('click', (e) => {
+    if (e.target.closest('.conversation-row')) document.body.classList.remove('mobile-nav-open');
+  });
+  document.addEventListener('click', (e) => {
+    if (!document.body.classList.contains('mobile-nav-open')) return;
+    if (e.target.closest('.left-sidebar') || e.target.closest('#mobileNavBtn')) return;
+    document.body.classList.remove('mobile-nav-open');
+  });
 
   const leftTabs = document.querySelectorAll('.left-tab');
   const leftTabBuild = $('leftTabBuild');
@@ -939,6 +1036,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const bubbleContent = this.finalEl.parentElement || this.finalEl.parent || this.el;
       const sourceHtml = renderSources(run.meta?.sources || []);
       if (sourceHtml) bubbleContent.innerHTML += sourceHtml;
+      // Screen-test evidence: screenshots captured by the computer-use agent.
+      const shots = (run.artifacts || []).filter((a) => a.kind === 'screenshot' && a.path);
+      if (shots.length) {
+        const grid = document.createElement('div');
+        grid.className = 'screen-shot-grid';
+        grid.innerHTML = shots.map((s, i) =>
+          `<a href="${artifactUrl(s.path)}" target="_blank" rel="noopener noreferrer" title="Step ${s.meta?.step ?? i + 1}">` +
+          `<img src="${artifactUrl(s.path)}" alt="Screen test step ${s.meta?.step ?? i + 1}" loading="lazy"></a>`).join('');
+        bubbleContent.appendChild(grid);
+      }
       addAssistantActions(bubbleContent, run.final_output || '', () => {
         runAgentTask(run.task || '', run.attachments || []);
       });
@@ -1060,7 +1167,8 @@ document.addEventListener('DOMContentLoaded', () => {
     scrollMessagesToBottom();
     try {
       const body = { text: prompt, mode: currentMode === 'general' ? 'research' : currentMode, model: selectedModel.key,
-        web_search: currentMode === 'research' || webSearchEnabled, attachments: attachmentIds };
+        web_search: currentMode === 'research' || webSearchEnabled, attachments: attachmentIds,
+        project_id: getActiveProject()?.id || null };
       if (selectedAgent) body.agent_id = selectedAgent.id;
       if (conversationId) body.conversation_id = conversationId;
       const created = await api.post('/api/runs', body);
@@ -1145,6 +1253,8 @@ document.addEventListener('DOMContentLoaded', () => {
       agentList.appendChild(card);
     });
   }
+  // settings.js re-renders agent cards after permission edits.
+  window.loadAgents = loadAgents;
 
   function showAgentDetails(agent) {
     openDrawer(`Agent · ${agent.name}`, 'agent');
@@ -1213,6 +1323,8 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (tool === 'terminal') renderTerminalDrawer();
       else if (tool === 'mcp') renderMcpDrawer();
       else if (tool === 'plugins') renderPluginsDrawer();
+      else if (tool === 'screen') renderScreenDrawer();
+      else if (tool === 'vault') renderVaultDrawer();
     });
   });
   $('leftPluginsBtn')?.addEventListener('click', renderPluginsDrawer);
@@ -1457,6 +1569,25 @@ document.addEventListener('DOMContentLoaded', () => {
     return Number.isNaN(date.getTime()) ? 'Older' : date.toLocaleDateString([], { month: 'long', year: 'numeric' });
   }
 
+  function chatRow(conversation, compact = false) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = `conversation-row${conversation.id === conversationId ? ' selected' : ''}${compact ? ' compact' : ''}`;
+    row.dataset.conversationId = conversation.id;
+    row.setAttribute('aria-current', conversation.id === conversationId ? 'true' : 'false');
+    row.title = conversation.title || 'Untitled conversation';
+    const active = Array.isArray(conversation.active_runs) ? conversation.active_runs.length : Number(conversation.active_runs) || 0;
+    const count = Number(conversation.message_count) || 0;
+    const preview = typeof conversation.last_message === 'string' ? conversation.last_message : conversation.last_message?.content || '';
+    const time = compact ? relTime(conversation.updated_at || conversation.created_at)
+      : formatTime(conversation.updated_at || conversation.created_at);
+    row.innerHTML = `<div class="conversation-row-top">${modeBadge(conversation.mode)}<strong>${escapeHtml(conversation.title || 'Untitled conversation')}</strong>${active ? '<span class="conversation-live">Active</span>' : ''}${compact && time ? `<span class="conversation-time">${escapeHtml(time)}</span>` : ''}</div>
+      ${!compact && preview ? `<div class="conversation-preview">${escapeHtml(preview.slice(0, 180))}</div>` : ''}
+      ${!compact ? `<div class="conversation-meta"><span>${count} message${count === 1 ? '' : 's'}</span><span>${escapeHtml(time)}</span></div>` : ''}`;
+    row.addEventListener('click', () => openConversation(conversation.id));
+    return row;
+  }
+
   function renderConversationRows(container, items, compact = false) {
     container.innerHTML = '';
     if (!items.length) {
@@ -1474,35 +1605,175 @@ document.addEventListener('DOMContentLoaded', () => {
         heading.textContent = group;
         container.appendChild(heading);
       }
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = `conversation-row${conversation.id === conversationId ? ' selected' : ''}${compact ? ' compact' : ''}`;
-      row.dataset.conversationId = conversation.id;
-      row.setAttribute('aria-current', conversation.id === conversationId ? 'true' : 'false');
-      row.title = conversation.title || 'Untitled conversation';
-      const active = Array.isArray(conversation.active_runs) ? conversation.active_runs.length : Number(conversation.active_runs) || 0;
-      const count = Number(conversation.message_count) || 0;
-      const preview = typeof conversation.last_message === 'string' ? conversation.last_message : conversation.last_message?.content || '';
-      row.innerHTML = `<div class="conversation-row-top"><strong>${escapeHtml(conversation.title || 'Untitled conversation')}</strong>${active ? '<span class="conversation-live">Active</span>' : ''}</div>
-        ${!compact && preview ? `<div class="conversation-preview">${escapeHtml(preview.slice(0, 180))}</div>` : ''}
-        <div class="conversation-meta"><span>${escapeHtml(conversation.mode || 'chat')}</span><span>${count} message${count === 1 ? '' : 's'}</span>${!compact ? `<span>${escapeHtml(formatTime(conversation.updated_at || conversation.created_at))}</span>` : ''}</div>`;
-      row.addEventListener('click', () => openConversation(conversation.id));
-      container.appendChild(row);
+      container.appendChild(chatRow(conversation, compact));
     });
   }
 
-  async function loadRecentConversations() {
-    const container = $('recentConversations');
+  // ---- Projects sidebar (ZCode-style: project folders with their chats nested
+  // underneath, standalone chats listed below) ------------------------------
+  let projectsCache = [];
+  let lastSidebarConversations = [];
+  let sidebarRequest = 0;
+  const ACTIVE_PROJECT_KEY = () => `jevora_active_project:${currentUser?.id || 'local'}`;
+
+  function getActiveProject() {
+    try { return JSON.parse(localStorage.getItem(ACTIVE_PROJECT_KEY()) || 'null'); } catch (_) { return null; }
+  }
+
+  function setActiveProject(project) {
+    try {
+      if (project) localStorage.setItem(ACTIVE_PROJECT_KEY(), JSON.stringify({ id: project.id, name: project.name }));
+      else localStorage.removeItem(ACTIVE_PROJECT_KEY());
+    } catch (_) { /* private browsing */ }
+    renderProjectsSection();
+    if (project) showToast(`New chats will be created in “${project.name}”`);
+  }
+
+  function expandedProjects() {
+    let ids = [];
+    try { ids = JSON.parse(localStorage.getItem('jevora_expanded_projects') || '[]'); } catch (_) { ids = []; }
+    return new Set(Array.isArray(ids) ? ids : []);
+  }
+
+  function toggleExpandedProject(id) {
+    const set = expandedProjects();
+    if (set.has(id)) set.delete(id); else set.add(id);
+    try { localStorage.setItem('jevora_expanded_projects', JSON.stringify([...set])); } catch (_) { /* ignore */ }
+  }
+
+  async function loadProjects() {
+    try { projectsCache = await api.get('/api/projects'); }
+    catch (_) { projectsCache = []; }
+    return projectsCache;
+  }
+
+  function projectRow(project, chats) {
+    const active = getActiveProject();
+    const isActive = active?.id === project.id;
+    const expanded = expandedProjects().has(project.id);
+    const wrap = document.createElement('div');
+    wrap.className = `project-group${isActive ? ' active-project' : ''}`;
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'project-row';
+    head.title = `${project.name}${project.root_path ? `\n${project.root_path}` : ''}`;
+    head.innerHTML = `<span class="project-caret">${expanded ? '▾' : '▸'}</span>
+      <span class="project-folder">${folderSvg}</span>
+      <strong>${escapeHtml(project.name)}</strong>
+      ${isActive ? '<span class="project-active-pill">Active</span>' : ''}
+      <span class="project-count">${chats.length || ''}</span>`;
+    head.addEventListener('click', () => {
+      toggleExpandedProject(project.id);
+      setActiveProject(isActive ? null : { id: project.id, name: project.name });
+    });
+    wrap.appendChild(head);
+    if (expanded) {
+      const list = document.createElement('div');
+      list.className = 'project-chats';
+      if (chats.length) chats.forEach((c) => list.appendChild(chatRow(c, true)));
+      else list.innerHTML = '<div class="project-chat-empty">No chats in this project yet</div>';
+      wrap.appendChild(list);
+    }
+    return wrap;
+  }
+
+  const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+  const plusSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+
+  function renderProjectsSection(conversations) {
+    if (conversations) lastSidebarConversations = conversations;
+    const items = conversations || lastSidebarConversations;
+    const container = $('sidebarProjects');
     if (!container) return;
-    const request = ++recentRequest;
+    container.innerHTML = '';
+    const byProject = new Map();
+    const standalone = [];
+    items.forEach((c) => {
+      if (c.project_id && projectsCache.some((p) => p.id === c.project_id)) {
+        if (!byProject.has(c.project_id)) byProject.set(c.project_id, []);
+        byProject.get(c.project_id).push(c);
+      } else standalone.push(c);
+    });
+    // Projects header with the create / open-folder actions
+    const head = document.createElement('div');
+    head.className = 'conversation-section-label projects-header';
+    head.innerHTML = '<span>Projects</span><span class="projects-actions">' +
+      `<button class="sidebar-mini-btn" id="openFolderBtn" type="button" title="Open existing folder as a project">${folderSvg}</button>` +
+      `<button class="sidebar-mini-btn" id="newProjectBtn" type="button" title="New project">${plusSvg}</button></span>`;
+    container.appendChild(head);
+    head.querySelector('#newProjectBtn').addEventListener('click', createProjectFlow);
+    head.querySelector('#openFolderBtn').addEventListener('click', () => openFolderPicker(null));
+
+    if (projectsCache.length) {
+      projectsCache.forEach((project) => container.appendChild(projectRow(project, byProject.get(project.id) || [])));
+    } else {
+      const none = document.createElement('div');
+      none.className = 'project-chat-empty';
+      none.textContent = 'No projects yet — click + to create one';
+      container.appendChild(none);
+    }
+
+    const chatsLabel = document.createElement('div');
+    chatsLabel.className = 'conversation-section-label chats-label';
+    chatsLabel.textContent = projectsCache.length ? 'Chats' : 'Recent conversations';
+    container.appendChild(chatsLabel);
+    const chatsBox = document.createElement('div');
+    if (standalone.length) standalone.forEach((c) => chatsBox.appendChild(chatRow(c, true)));
+    else chatsBox.innerHTML = `<div class="conversation-empty"><span>No conversations yet. Start a new task above.</span></div>`;
+    container.appendChild(chatsBox);
+  }
+
+  async function createProjectFlow() {
+    const name = window.prompt('New project name', '');
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) { showToast('Project name cannot be empty'); return; }
+    try {
+      const project = await api.post('/api/projects', { name: trimmed });
+      showToast(`Project “${project.name}” created`);
+      await loadProjects();
+      const set = expandedProjects(); set.add(project.id);
+      try { localStorage.setItem('jevora_expanded_projects', JSON.stringify([...set])); } catch (_) { /* ignore */ }
+      setActiveProject({ id: project.id, name: project.name });
+      renderProjectsSection(await fetchSidebarConversations());
+    } catch (error) { showToast(`Create failed: ${error.message}`); }
+  }
+
+  async function openFolderPicker(project) {
+    let path = null;
+    if (window.jevora?.chooseFolder) {
+      path = await window.jevora.chooseFolder();
+    } else {
+      path = window.prompt('Folder path to open as a project', project?.root_path || '');
+    }
+    if (!path) return;
+    try {
+      const opened = await api.post('/api/projects/open', { path });
+      showToast(`Opened folder “${opened.name}”`);
+      await loadProjects();
+      const set = expandedProjects(); set.add(opened.id);
+      try { localStorage.setItem('jevora_expanded_projects', JSON.stringify([...set])); } catch (_) { /* ignore */ }
+      setActiveProject({ id: opened.id, name: opened.name });
+      renderProjectsSection(await fetchSidebarConversations());
+    } catch (error) { showToast(`Could not open folder: ${error.message}`); }
+  }
+
+  async function fetchSidebarConversations() {
+    const page = await api.get('/api/conversations?limit=80');
+    return [...page.items].sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+  }
+
+  async function loadRecentConversations() {
+    const container = $('sidebarProjects');
+    if (!container) return;
+    const request = ++sidebarRequest;
     if (!container.children.length) container.innerHTML = '<div class="conversation-loading" role="status">Loading conversations…</div>';
     try {
-      const page = await api.get('/api/conversations?limit=50');
-      if (request !== recentRequest) return;
-      const sorted = [...page.items].sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
-      renderConversationRows(container, sorted.slice(0, 12), true);
+      const [conversations] = await Promise.all([fetchSidebarConversations(), loadProjects()]);
+      if (request !== sidebarRequest) return;
+      renderProjectsSection(conversations);
     } catch (_) {
-      if (request !== recentRequest) return;
+      if (request !== sidebarRequest) return;
       container.innerHTML = '<div class="conversation-empty"><span>Conversations are unavailable.</span><button class="chip-btn" type="button">Try again</button></div>';
       container.querySelector('button').addEventListener('click', loadRecentConversations);
     }
@@ -1664,6 +1935,197 @@ document.addEventListener('DOMContentLoaded', () => {
           if (act === 'delete') await api.del(`/api/vms/${id}`); else await api.post(`/api/vms/${id}/${act}`);
           renderVmsDrawer(); refreshStatus();
         } catch (error) { showToast(error.message); }
+      });
+    });
+  }
+
+  // ---- Screen tests & browser control (PRD §3.5) ---------------------------
+  function artifactUrl(path) {
+    return `/api/artifacts?path=${encodeURIComponent(path)}${api.token ? `&token=${encodeURIComponent(api.token)}` : ''}`;
+  }
+
+  async function renderScreenDrawer() {
+    if (currentDrawer !== 'screen') openDrawer('Screen Tests & Browser Control', 'screen');
+    drawerBody.innerHTML = '<div class="drawer-muted">Loading…</div>';
+    let sessions = [];
+    try { sessions = await api.get('/api/browser-control/sessions'); }
+    catch (error) { drawerBody.innerHTML = `<div class="drawer-card">Could not load browser sessions: ${escapeHtml(error.message)}</div>`; return; }
+
+    drawerBody.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="drawer-card">
+          <div class="drawer-section-label">AUTOMATED SCREEN TEST</div>
+          <div class="drawer-muted" style="margin:4px 0 8px">A vision agent drives a real browser to accomplish the goal, then checks your assertions. Screenshots land in the run.</div>
+          <input class="drawer-input" id="screenUrl" placeholder="App URL (e.g. http://localhost:3000)">
+          <input class="drawer-input" id="screenGoal" placeholder="Goal — e.g. log in and create a note" style="margin-top:6px">
+          <input class="drawer-input" id="screenExpect" placeholder='Expect on screen (comma separated) — e.g. Welcome, Dashboard' style="margin-top:6px">
+          <button class="chip-btn primary" type="button" id="screenRunBtn" style="margin-top:8px">Run screen test</button>
+        </div>
+        <div>
+          <div class="drawer-section-label">BROWSER SESSIONS</div>
+          <div id="screenSessions" style="display:flex;flex-direction:column;gap:10px;margin-top:6px;">
+            ${sessions.map((s) => `
+              <div class="drawer-card" data-id="${escapeHtml(s.id)}">
+                <div class="drawer-row-between"><strong>${escapeHtml(s.name)}</strong>
+                  <span class="${s.status === 'running' ? 'status-text-ok' : s.status === 'error' ? 'status-text-bad' : 'status-text-warn'}">${escapeHtml(s.status)}</span></div>
+                <div class="drawer-muted">${escapeHtml(s.kind)}${s.headless ? ' · headless' : ''}</div>
+                <div class="screen-shot-preview" data-role="shot"></div>
+                <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+                  <button class="chip-btn" type="button" data-act="shot">Screenshot</button>
+                  <button class="chip-btn" type="button" data-act="navigate">Navigate</button>
+                  <button class="chip-btn" type="button" data-act="assert">Assert text</button>
+                  ${s.status === 'running' ? '<button class="chip-btn" type="button" data-act="stop">Stop</button>'
+                                           : '<button class="chip-btn primary" type="button" data-act="start">Start</button>'}
+                  <button class="chip-btn danger" type="button" data-act="delete">Delete</button>
+                </div>
+              </div>`).join('') || '<div class="drawer-muted">No browser sessions yet.</div>'}
+          </div>
+        </div>
+        <div class="drawer-card">
+          <div class="drawer-section-label">START A SESSION</div>
+          <input class="drawer-input" id="sessionUrl" placeholder="Start URL (optional)" style="margin-top:6px">
+          <label class="drawer-muted" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" class="toggle-input" id="sessionHeadless" checked> Headless</label>
+          <button class="chip-btn primary" type="button" id="sessionStartBtn" style="margin-top:8px">Start browser session</button>
+          <div class="drawer-muted" style="margin-top:6px">Playwright Chromium; domains outside localhost need SCREEN_ALLOWED_DOMAINS.</div>
+        </div>
+      </div>`;
+
+    $('screenRunBtn').addEventListener('click', async () => {
+      const url = $('screenUrl').value.trim();
+      const goal = $('screenGoal').value.trim();
+      const expects = $('screenExpect').value.split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+      if (!url) { showToast('Enter the app URL first'); return; }
+      const text = [`/test`, url, goal || 'verify the app works'].join(' ') +
+        expects.map((e) => ` expect "${e}"`).join('');
+      try {
+        const created = await api.post('/api/runs', { text, mode: 'build' });
+        showToast('Screen test started — watch it in the conversation');
+        closeDrawer();
+        if (created.conversation_id) await openConversation(created.conversation_id);
+      } catch (error) { showToast(`Could not start the test: ${error.message}`); }
+    });
+
+    $('sessionStartBtn').addEventListener('click', async () => {
+      const url = $('sessionUrl').value.trim() || null;
+      try {
+        const created = await api.post('/api/browser-control/sessions',
+          { name: 'Manual session', kind: 'playwright', url, headless: $('sessionHeadless').checked });
+        await api.post(`/api/browser-control/sessions/${encodeURIComponent(created.id)}/start`, {});
+        showToast('Browser session started');
+        renderScreenDrawer();
+      } catch (error) { showToast(`Could not start a session: ${error.message}`); }
+    });
+
+    drawerBody.querySelectorAll('#screenSessions [data-id]').forEach((card) => {
+      const id = card.dataset.id;
+      const shot = () => card.querySelector('[data-role="shot"]');
+      card.querySelectorAll('[data-act]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const act = btn.dataset.act;
+          const base = `/api/browser-control/sessions/${encodeURIComponent(id)}`;
+          try {
+            if (act === 'shot') {
+              const img = await api.get(`${base}/screenshot`);
+              shot().innerHTML = `<img src="data:image/png;base64,${img.b64_png}" alt="session screenshot">`;
+            } else if (act === 'navigate') {
+              const url = window.prompt('Navigate to URL');
+              if (!url) return;
+              await api.post(`${base}/action`, { action: { action: 'navigate', url } });
+              showToast('Navigated');
+            } else if (act === 'assert') {
+              const value = window.prompt('Text that should be visible on the page');
+              if (!value) return;
+              const result = await api.post(`${base}/assert`, { type: 'text_visible', value });
+              showToast(`${result.passed ? 'PASS' : 'FAIL'}: ${result.name} ${result.detail || ''}`.trim());
+            } else if (act === 'stop') { await api.post(`${base}/stop`, {}); renderScreenDrawer();
+            } else if (act === 'start') { await api.post(`${base}/start`, {}); renderScreenDrawer();
+            } else if (act === 'delete') { await api.del(base); renderScreenDrawer(); }
+          } catch (error) { showToast(`Screen control: ${error.message}`); }
+        });
+      });
+    });
+  }
+
+  // ---- Obsidian vault browser (PRD §3.6) -----------------------------------
+  async function renderVaultDrawer() {
+    if (currentDrawer !== 'vault') openDrawer('Obsidian Vault', 'vault');
+    drawerBody.innerHTML = '<div class="drawer-muted">Loading vault…</div>';
+    let config;
+    let data;
+    try {
+      [config, data] = await Promise.all([api.get('/api/vault/config'), api.get('/api/vault/runs')]);
+    } catch (error) { drawerBody.innerHTML = `<div class="drawer-card">Could not load the vault: ${escapeHtml(error.message)}</div>`; return; }
+
+    drawerBody.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="drawer-card">
+          <div class="drawer-section-label">VAULT LOCATION</div>
+          <div class="drawer-muted" style="word-break:break-all">${escapeHtml(data.vault || config.path)}</div>
+          ${config.writable === false ? `<div class="status-text-bad" style="margin-top:4px">${escapeHtml(config.error || 'not writable')}</div>` : ''}
+          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <button class="chip-btn" type="button" id="vaultOpenBtn">Open folder</button>
+            <button class="chip-btn" type="button" id="vaultMoveBtn">Change location</button>
+            <button class="chip-btn" type="button" id="vaultReindexBtn">Reindex from vault</button>
+          </div>
+          <div class="drawer-muted" style="margin-top:6px">Every run's transcript — including the agent/subagent call tree — is saved here as plain markdown.</div>
+        </div>
+        <div>
+          <div class="drawer-section-label">RUN NOTES</div>
+          <div id="vaultRuns" style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">
+            ${data.runs.map((r) => `
+              <button class="drawer-card vault-run" type="button" data-run="${escapeHtml(r.run_id)}">
+                <div class="drawer-row-between"><strong>${escapeHtml(r.title || r.run_id)}</strong>
+                  <span class="${r.status === 'done' ? 'status-text-ok' : r.status === 'failed' ? 'status-text-bad' : 'status-text-warn'}">${escapeHtml(r.status || '')}</span></div>
+                <div class="drawer-muted">${modeBadge(r.mode)} ${escapeHtml(r.path || '')} ${r.verdict ? ` · ⚖ ${escapeHtml(r.verdict)}` : ''}</div>
+              </button>`).join('') || '<div class="drawer-muted">No run notes yet — they appear after your first task.</div>'}
+          </div>
+        </div>
+        <div id="vaultNote"></div>
+      </div>`;
+
+    const openInOs = async () => {
+      const target = data.vault || config.path;
+      if (window.jevora?.openPath) {
+        const result = await window.jevora.openPath(target);
+        if (result && result.ok === false && result.message) showToast(result.message);
+      } else showToast(target);
+    };
+    $('vaultOpenBtn').addEventListener('click', openInOs);
+    $('vaultReindexBtn').addEventListener('click', async () => {
+      try {
+        const result = await api.post('/api/vault/reindex');
+        showToast(`Reindexed: ${result.imported ?? result.runs ?? 'ok'}`);
+        renderVaultDrawer();
+      } catch (error) { showToast(`Reindex failed: ${error.message}`); }
+    });
+    $('vaultMoveBtn').addEventListener('click', async () => {
+      let path = null;
+      if (window.jevora?.chooseFolder) path = await window.jevora.chooseFolder();
+      else path = window.prompt('Vault folder path', data.vault || '');
+      if (!path) return;
+      try { await api.put('/api/vault/config', { path }); showToast('Vault location updated'); renderVaultDrawer(); }
+      catch (error) { showToast(`Could not move the vault: ${error.message}`); }
+    });
+
+    drawerBody.querySelectorAll('.vault-run').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const runId = btn.dataset.run;
+        const note = $('vaultNote');
+        note.innerHTML = '<div class="drawer-muted">Loading note…</div>';
+        try {
+          const detail = await api.get(`/api/vault/runs/${encodeURIComponent(runId)}`);
+          const record = detail.record || {};
+          const tree = detail.tree || {};
+          note.innerHTML = `
+            <div class="drawer-card">
+              <div class="drawer-row-between"><div class="drawer-section-label">NOTE · ${escapeHtml(runId)}</div>
+                <button class="chip-btn" type="button" id="vaultNoteBack">Back</button></div>
+              ${record.final_output ? `<div class="md-content" style="font-size:12.5px">${renderMarkdown(record.final_output)}</div>` : '<div class="drawer-muted">(no final output recorded)</div>'}
+              <div class="drawer-muted" style="margin-top:8px">${tree.agents ?? 0} agents · ${tree.subagents ?? 0} subagents — see the note in Obsidian for the full call tree.</div>
+            </div>`;
+          $('vaultNoteBack').addEventListener('click', () => { note.innerHTML = ''; });
+          note.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch (error) { note.innerHTML = `<div class="drawer-card">${escapeHtml(error.message)}</div>`; }
       });
     });
   }
@@ -1861,6 +2323,46 @@ document.addEventListener('DOMContentLoaded', () => {
     anthropic: { name: 'Anthropic Claude', url: 'https://api.anthropic.com/v1' },
   };
 
+  // Browsable catalog (PRD §3.3): known OpenAI-compatible endpoints beyond the
+  // user's saved providers. Click → prompt for a key → save.
+  const PROVIDER_CATALOG = [
+    { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', sub: 'Hundreds of models, one key' },
+    { id: 'groq', name: 'Groq', url: 'https://api.groq.com/openai/v1', sub: 'Llama & Mixtral, very fast' },
+    { id: 'deepseek', name: 'DeepSeek', url: 'https://api.deepseek.com/v1', sub: 'DeepSeek V3 / R1' },
+    { id: 'mistral', name: 'Mistral', url: 'https://api.mistral.ai/v1', sub: 'Mistral Large & Small' },
+    { id: 'together', name: 'Together AI', url: 'https://api.together.xyz/v1', sub: 'Hosted open models' },
+    { id: 'xai', name: 'xAI (Grok)', url: 'https://api.x.ai/v1', sub: 'Grok models' },
+    { id: 'lmstudio', name: 'LM Studio (local)', url: 'http://localhost:1234/v1', sub: 'Local models, no key needed' },
+  ];
+
+  function renderProviderCatalog() {
+    const list = document.querySelector('.provider-available-list');
+    if (!list || list.querySelector('[data-catalog]')) return;
+    const label = document.createElement('div');
+    label.className = 'model-pop-section-label';
+    label.dataset.catalog = '1';
+    label.textContent = 'MORE PROVIDERS';
+    label.style.marginTop = '10px';
+    list.appendChild(label);
+    PROVIDER_CATALOG.forEach((entry) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'provider-available-item';
+      item.innerHTML = `<span class="provider-logo custom-logo">${escapeHtml(entry.name.slice(0, 2).toUpperCase())}</span>
+        <div class="provider-item-text"><span class="provider-item-name">${escapeHtml(entry.name)}</span>
+        <span class="provider-item-sub">${escapeHtml(entry.sub)}</span></div>`;
+      item.addEventListener('click', async () => {
+        const apiKey = prompt(`Enter your API key for ${entry.name}${entry.id === 'lmstudio' ? ' (leave empty for a local server)' : ''}:`, '');
+        if (apiKey === null) return;
+        const saved = await saveProvider({ name: entry.name, url: entry.url, apiKey: apiKey || '' });
+        if (saved) showToast(`${entry.name} saved!`);
+        renderSavedProviders();
+        openPanel(PANEL_MODEL);
+      });
+      list.appendChild(item);
+    });
+  }
+
   document.querySelectorAll('.provider-available-item[data-provider]').forEach((item) => {
     item.addEventListener('click', async () => {
       const defaults = PROVIDER_DEFAULTS[item.dataset.provider];
@@ -2037,6 +2539,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const health = await api.get('/api/system/health?probe=false');
       engineName = health.decision_engine?.active || engineName;
     } catch (_) { /* offline */ }
+    renderProviderCatalog();
     renderSavedProviders();
     syncSavedProviders();
     refreshStatus();

@@ -18,6 +18,7 @@ from starlette.types import Scope
 from backend import __version__
 from backend.api import (
     agents,
+    artifacts,
     attachments,
     auth,
     browser_control,
@@ -90,7 +91,7 @@ def create_app(settings: Settings | None = None,
         return response
 
     for module in (auth, providers, runs, conversations, agents, workspace, terminal, vms, vault, extras, mcp,
-                   attachments, system, browser_control, scheduled, projects, usage):
+                   attachments, system, browser_control, scheduled, projects, usage, artifacts):
         app.include_router(module.router)
 
     if settings.frontend_dir.exists():

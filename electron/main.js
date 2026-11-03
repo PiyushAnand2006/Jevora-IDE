@@ -4,7 +4,7 @@
 // releases — plus the one thing EmberLink doesn't have: a managed Python
 // backend child (see electron/backend.js).
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, shell, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 
@@ -15,6 +15,13 @@ const { BackendManager, isDev } = require("./backend");
 // caused silent aborts on this machine). Packaged builds keep the default.
 if (isDev()) {
   app.setPath("userData", path.join(__dirname, "..", ".jevora-data", "electron"));
+}
+
+// Windows groups and pins the taskbar button by AppUserModelID; it must match
+// the appId electron-builder stamps into the exe, or the taskbar falls back to
+// the generic Electron icon.
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.piyyushanand.jevora");
 }
 
 // Chromium's sandbox broker aborts the whole process on some Windows setups
@@ -176,7 +183,6 @@ function bootstrap() {
     }
     if (!url) {
       const message = startError || (backend.logs || "").slice(-1500) || "unknown error";
-      const { dialog } = require("electron");
       dialog.showErrorBox("Jevora IDE — backend failed to start", message);
       app.quit();
       return;
@@ -203,6 +209,26 @@ function bootstrap() {
     ipcMain.on("updater:install", () => updateApi?.install());
     ipcMain.handle("updater:openReleases", () => shell.openExternal("https://github.com/PiyushAnand2006/Jevora-IDE/releases/latest"));
     ipcMain.handle("backend:status", () => ({ state: backend.state, port: backend.port, url: backend.baseUrl, logs: backend.logs }));
+    // Native folder picker: "Open existing folder as a project" in the sidebar.
+    ipcMain.handle("workspace:chooseFolder", async () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return null;
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: "Open folder as a Jevora project",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (result.canceled || !result.filePaths.length) return null;
+      return result.filePaths[0];
+    });
+    // Reveal a folder (e.g. the Obsidian vault) in the OS file manager.
+    ipcMain.handle("shell:openPath", async (_event, target) => {
+      if (typeof target !== "string" || !target.trim()) return { ok: false, message: "no path given" };
+      try {
+        const errorMessage = await shell.openPath(target);
+        return { ok: !errorMessage, message: errorMessage || "" };
+      } catch (err) {
+        return { ok: false, message: String(err?.message || err) };
+      }
+    });
   });
 
   app.on("window-all-closed", () => {

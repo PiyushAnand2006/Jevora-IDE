@@ -8,7 +8,10 @@
 (function () {
   "use strict";
 
-  if (typeof api !== "function") return; // app.js must load first
+  // app.js exposes the API client on window inside its own DOMContentLoaded
+  // handler, which runs before the wire() below — so capture it there, not at
+  // script-parse time (a parse-time check saw undefined and killed this file).
+  let api = null;
 
   /* ================= shared modal scaffold ================= */
 
@@ -443,11 +446,13 @@
   if (document.readyState !== "loading") wire();
   else document.addEventListener("DOMContentLoaded", wire);
   function wire() {
+    if (!window.api) return; // app.js must have booted (same tick order)
+    api = window.api;
     bindNavButton("Library", openLibrary);
     bindNavButton("Scheduled", openScheduled);
-    bindNavButton("Projects", openProjects);
+    // "Projects" lives in the sidebar rendered by app.js (project folders with
+    // their chats nested underneath); no modal binding here.
     // MCP catalog button inside the Context & Tools panel
-    const mcpBtn = document.querySelector("#ctxMcp .ctx-row, .ctx-row");
     document.querySelectorAll(".ctx-row").forEach((row) => {
       if (row.textContent.includes("MCP")) {
         const btn = el("button", "jv-btn jv-btn-secondary", "Browse MCP catalog");

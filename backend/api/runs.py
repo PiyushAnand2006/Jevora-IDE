@@ -31,6 +31,7 @@ class RunCreate(BaseModel):
     agent_id: str | None = None
     conversation_id: str | None = None
     workspace_id: str | None = None
+    project_id: str | None = None
 
 
 class EscalationAnswer(BaseModel):

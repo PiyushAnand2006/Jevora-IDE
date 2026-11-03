@@ -15,14 +15,17 @@ from backend.conversations import owned_conversation
 from backend.core.errors import AppError
 from backend.core.events import TERMINAL_STATUSES
 from backend.core.ids import iso, utcnow
-from backend.db.models import Conversation, Message, Run
+from backend.db.models import Conversation, Message, Run, Workspace
 from backend.orchestrator.runs import decode_cursor, encode_cursor
 
 router = APIRouter(tags=["conversations"])
 
 
 class ConversationUpdate(BaseModel):
-    title: str = Field(min_length=1, max_length=300)
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    # Move a conversation into a project (workspace id) or out of one (null).
+    project_id: str | None = Field(default=None, max_length=64)
+    detach_project: bool = False
 
 
 class ConversationBranch(BaseModel):
@@ -56,7 +59,8 @@ async def _summaries(session: AsyncSession, conversations: list[Conversation]) -
             latest.setdefault(run.conversation_id, run)
             if run.status not in TERMINAL_STATUSES:
                 active.setdefault(run.conversation_id, []).append(run.id)
-    return [{"id": c.id, "title": c.title, "mode": c.mode, "created_at": iso(c.created_at),
+    return [{"id": c.id, "title": c.title, "mode": c.mode, "project_id": c.project_id,
+             "created_at": iso(c.created_at),
              "updated_at": iso(c.updated_at), "message_count": counts.get(c.id, 0),
              "latest_run": _run_public(latest[c.id]) if c.id in latest else None,
              "active_run_ids": active.get(c.id, [])} for c in conversations]
@@ -162,13 +166,23 @@ async def edit_conversation_message(conversation_id: str, body: ConversationEdit
 
 @router.patch("/api/conversations/{conversation_id}")
 async def update_conversation(conversation_id: str, body: ConversationUpdate,
-                               user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
-    title = body.title.strip()
-    if not title:
+                              user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
+    title = (body.title or "").strip()
+    if body.title is not None and not title:
         raise AppError("title must not be empty", code="invalid_title", status_code=422)
+    if body.project_id:
+        async with ctx.sessions() as session:
+            workspace = await session.get(Workspace, body.project_id)
+        if workspace is None or workspace.user_id != user.id:
+            raise AppError("project not found", code="project_not_found", status_code=404)
     async with ctx.sessions() as session:
         conversation = await owned_conversation(session, user.id, conversation_id)
-        conversation.title = title
+        if title:
+            conversation.title = title
+        if body.detach_project:
+            conversation.project_id = None
+        elif body.project_id:
+            conversation.project_id = body.project_id
         conversation.updated_at = utcnow()
         await session.commit()
         return (await _summaries(session, [conversation]))[0]

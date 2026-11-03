@@ -395,13 +395,16 @@
       if (!response.ok) {
         let detail = data.detail;
         if (Array.isArray(detail)) detail = detail.map((d) => d.msg).join(' ');
-        if (data.code === 'email_not_registered') detail = 'Email not registered';
+        if (data.code === 'email_not_registered') detail = 'No account exists for this email yet — create one below.';
+        if (data.code === 'email_taken') detail = 'This email is already registered.';
         if (data.code === 'email_delivery_failed') detail = 'Unable to send the OTP email. Please try again later.';
         if (response.status === 429) {
           const wait = response.headers.get('Retry-After');
           detail = `Too many attempts. Try again${wait ? ` in ${wait}s` : ' shortly'}.`;
         }
-        throw new Error(detail || `Request failed (HTTP ${response.status})`);
+        const error = new Error(detail || `Request failed (HTTP ${response.status})`);
+        error.code = data.code;
+        throw error;
       }
       return data;
     }
@@ -429,7 +432,23 @@
         showMessage(`Welcome${data.user?.name ? `, ${data.user.name}` : ''}! Opening your workspace…`, 'success');
         window.location.href = 'index.html';
       } catch (error) {
-        showMessage(error.message || 'Sign-in failed');
+        if (error.code === 'email_taken' && isSignUp) {
+          // The email exists: drop the user on the sign-in form with the email
+          // prefilled instead of a dead-end error.
+          setAuthMode(false);
+          emailInput.value = body.email;
+          passwordInput.value = '';
+          showMessage('This email is already registered. Enter your password to sign in.', 'success');
+          passwordInput.focus();
+        } else if (error.code === 'email_not_registered' && !isSignUp) {
+          setAuthMode(true);
+          emailInput.value = body.email;
+          passwordInput.value = '';
+          showMessage('No account exists for this email. Choose a password to create one.', 'success');
+          nameInput.focus();
+        } else {
+          showMessage(error.message || 'Sign-in failed');
+        }
         resetButton();
       }
     });

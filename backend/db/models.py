@@ -195,6 +195,9 @@ class Conversation(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(300), default="")
     mode: Mapped[str] = mapped_column(String(20), default="chat")
+    # Project (workspace) grouping — mirrors ZCode's session→project model:
+    # a conversation lives under the project it was started in; None = standalone chat.
+    project_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 

@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld("jevora", {
     },
   },
 
+  // native folder picker for "open existing folder as a project"
+  chooseFolder: () => ipcRenderer.invoke("workspace:chooseFolder"),
+  // reveal a folder (e.g. the Obsidian vault) in the OS file manager
+  openPath: (target) => ipcRenderer.invoke("shell:openPath", target),
+
   updater: {
     check: () => ipcRenderer.invoke("updater:check"),
     install: () => ipcRenderer.send("updater:install"),

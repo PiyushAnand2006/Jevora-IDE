@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, Query
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select, text
 
 from backend import __version__
 from backend.api.deps import Ctx, CurrentUser
 from backend.app_context import AppContext
+from backend.core.errors import AppError
 from backend.core.ids import iso, utcnow
+from backend.core.proc import run_process
 from backend.db.models import LLMCall
 
 router = APIRouter(tags=["system"])
@@ -123,3 +129,105 @@ async def ping_url(client: httpx.AsyncClient, url: str) -> bool:
         return response.status_code < 500
     except httpx.HTTPError:
         return False
+
+
+# --------------------------------------------------------------------------- sandbox runtime (Docker / WSL)
+#
+# The desktop app needs a command-isolation runtime for agents and the terminal.
+# On Windows that means Docker Desktop (WSL2 backend) and/or WSL itself. These
+# endpoints detect what is installed and kick off the user-approved setup
+# actions; downloads/opening the Docker site happen in the user's browser.
+
+DOCKER_DOWNLOAD_URL = "https://www.docker.com/products/docker-desktop/"
+WSL_DOC_URL = "https://learn.microsoft.com/en-us/windows/wsl/install"
+_DOCKER_DESKTOP_CANDIDATES = (
+    r"C:\Program Files\Docker\Docker\Docker Desktop.exe",
+    r"C:\Program Files\Docker\Docker\frontend\Docker Desktop.exe",
+)
+
+
+def _docker_desktop_path() -> str | None:
+    for candidate in _DOCKER_DESKTOP_CANDIDATES:
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
+
+async def _wsl_status() -> dict[str, Any]:
+    """Detect WSL: feature enabled and at least one distro installed."""
+    status: dict[str, Any] = {"available": False, "has_distro": False, "detail": ""}
+    try:
+        probe = await run_process(["wsl.exe", "--status"], timeout=15)
+    except (OSError, ValueError):
+        status["detail"] = "wsl.exe is not available on this system"
+        return status
+    if probe.exit_code != 0 and not probe.stdout.strip():
+        status["detail"] = (probe.stderr or "WSL is not installed").strip()[:300]
+        return status
+    status["available"] = True
+    listing = await run_process(["wsl.exe", "-l", "-q"], timeout=15)
+    distros = [line.strip() for line in (listing.stdout or "").splitlines() if line.strip()
+               and not line.startswith(("Windows Subsystem", "适用于"))]
+    status["has_distro"] = listing.exit_code == 0 and bool(distros)
+    if not status["has_distro"]:
+        status["detail"] = "WSL is present but no Linux distribution is installed yet"
+    return status
+
+
+@router.get("/api/system/runtime")
+async def runtime_status(user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
+    docker_version = await ctx.sandboxes.docker_info(refresh=True)
+    wsl = await _wsl_status()
+    desktop = _docker_desktop_path() if sys.platform == "win32" else None
+    docker = {"installed": bool(docker_version.get("version")), "running": docker_version.get("available", False),
+              "version": docker_version.get("version"), "desktop_path": desktop,
+              "download_url": DOCKER_DOWNLOAD_URL}
+    if docker["running"]:
+        recommendation = "ready"
+    elif sys.platform == "win32" and not wsl["available"]:
+        recommendation = "wsl_install"
+    elif docker["installed"]:
+        recommendation = "docker_start"
+    else:
+        recommendation = "docker_install"
+    return {"platform": sys.platform, "docker": docker, "wsl": wsl, "recommendation": recommendation,
+            "sandbox": await ctx.sandboxes.status(), "docs": {"docker": DOCKER_DOWNLOAD_URL, "wsl": WSL_DOC_URL}}
+
+
+class RuntimeAction(BaseModel):
+    action: str = Field(pattern="^(wsl_install|wsl_update|docker_start)$")
+
+
+@router.post("/api/system/runtime/enable")
+async def runtime_enable(body: RuntimeAction, user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
+    """Run one user-initiated setup step (WSL install/update or start Docker Desktop)."""
+    if body.action == "docker_start":
+        if sys.platform != "win32":
+            raise AppError("starting Docker Desktop is only supported on Windows",
+                           code="unsupported_platform", status_code=422)
+        desktop = _docker_desktop_path()
+        if desktop is None:
+            raise AppError("Docker Desktop is not installed; download it from docker.com",
+                           code="docker_not_installed", status_code=404)
+        try:
+            # Launch detached so the backend never owns the Docker Desktop process.
+            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            subprocess.Popen([desktop], cwd=str(Path(desktop).parent), creationflags=creationflags,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            raise AppError(f"could not launch Docker Desktop: {exc}", code="docker_launch_failed",
+                           status_code=500) from exc
+        return {"ok": True, "action": body.action,
+                "message": "Docker Desktop is starting — this can take up to a minute."}
+
+    argv = ["wsl.exe", "--install"] if body.action == "wsl_install" else ["wsl.exe", "--update"]
+    try:
+        result = await run_process(argv, timeout=600)
+    except (OSError, ValueError) as exc:
+        raise AppError(f"could not run wsl.exe: {exc}", code="wsl_failed", status_code=500) from exc
+    # wsl.exe writes UTF-16LE on Windows; drop the NUL padding the decoder kept.
+    message = (result.stdout or result.stderr or "").replace("\x00", "").strip()[-1500:]
+    if result.exit_code == 0 and body.action == "wsl_install":
+        message = message or "WSL components installed. A system restart may be required, then run this step again."
+    return {"ok": result.exit_code == 0, "action": body.action, "exit_code": result.exit_code,
+            "message": message or "done"}

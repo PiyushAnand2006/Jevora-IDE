@@ -68,12 +68,14 @@ class RunService:
                                  attachments=body.get("attachments") or [], agent_id=body.get("agent_id"),
                                  conversation_id=body.get("conversation_id"),
                                  workspace_id=body.get("workspace_id"), command=command,
+                                 project_id=body.get("project_id"),
                                  meta={**(body.get("meta") or {}), "web_search": bool(body.get("web_search", False))})
 
     async def create(self, user_id: str, *, text: str, mode: str, model: str | None = None,
                      attachments: list[str] | None = None, agent_id: str | None = None,
                      conversation_id: str | None = None, workspace_id: str | None = None,
-                     command: str | None = None, meta: dict[str, Any] | None = None) -> Run:
+                     command: str | None = None, meta: dict[str, Any] | None = None,
+                     project_id: str | None = None) -> Run:
         mode = MODE_ALIASES.get((mode or "build").lower(), (mode or "build").lower())
         if mode not in MODES:
             raise AppError(f"mode must be one of {', '.join(MODES)}", code="invalid_mode", status_code=422)
@@ -90,18 +92,21 @@ class RunService:
                   attachments=list(attachments or []), agent_id=agent_id, conversation_id=conversation_id,
                   workspace_id=workspace_id, status="queued", meta=meta or {})
         async with self.sessions() as session:
-            conversation = None
+            # Every run participates in a conversation so build/research/analysis
+            # history is saved exactly like chat (one project per conversation).
             if conversation_id is not None:
                 conversation = await owned_conversation(session, user_id, conversation_id, mode)
-            elif mode == "chat":
-                conversation = Conversation(user_id=user_id, title=text.splitlines()[0][:120], mode=mode)
+            else:
+                conversation = Conversation(user_id=user_id, title=text.splitlines()[0][:120], mode=mode,
+                                            project_id=project_id)
                 session.add(conversation)
                 await session.flush()
-            if conversation is not None:
-                run.conversation_id = conversation.id
-                conversation.updated_at = utcnow()
-                if mode == "chat":
-                    await save_message(session, conversation, run.id, "user", text)
+            run.conversation_id = conversation.id
+            # A run inside a project works in that project's folder (if it has one).
+            if project_id and not workspace_id:
+                run.workspace_id = project_id
+            conversation.updated_at = utcnow()
+            await save_message(session, conversation, run.id, "user", text)
             session.add(run)
             await session.commit()
             await session.refresh(run)

@@ -1,15 +1,19 @@
 /**
  * Jevora IDE — settings & governance UI.
  *
- * Opened from the profile chip: a Settings modal whose first tab is the
- * token/cost usage dashboard (per-day bars, per-model table). Also hosts the
- * per-agent tool-permission editor (checkbox grid over the tool catalog).
- * Pure CSS charts — no chart library.
+ * Opened from the profile chip: a Settings modal with two tabs —
+ *   1. Usage & cost: token/cost dashboard (per-day bars, per-model table).
+ *   2. Sandbox & VMs: WSL / Docker runtime detection with one-click
+ *      download / start / enable actions (agents + terminal isolation).
+ * Also hosts the per-agent tool-permission editor (checkbox grid).
  */
 (function () {
   "use strict";
 
-  if (typeof api !== "function") return;
+  // app.js exposes the API client on window inside its own DOMContentLoaded
+  // handler, which runs before the wire() below — capture it there, not at
+  // script-parse time.
+  let api = null;
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -44,59 +48,94 @@
 
   function fmt(n) { return (n ?? 0).toLocaleString("en-US"); }
   function fmtCost(v) { return "$" + (v ?? 0).toFixed(4); }
+  async function tryGet(path) { return api.get(path); }
+
+  function toast(msg) {
+    const t = document.querySelector(".toast-container");
+    const note = msg && msg.message ? msg.message : msg;
+    if (!t) return;
+    const n = el("div", "toast", String(note));
+    t.appendChild(n);
+    setTimeout(() => n.remove(), 3500);
+  }
+
+  /* ================= Settings shell (tabs) ================= */
+
+  function openSettings() {
+    openModal("Settings", (body) => {
+      const tabs = el("div", "jv-tabs");
+      const usageTab = el("button", "jv-tab active", "Usage & cost");
+      const runtimeTab = el("button", "jv-tab", "Sandbox & VMs");
+      tabs.appendChild(usageTab);
+      tabs.appendChild(runtimeTab);
+      body.appendChild(tabs);
+      const content = el("div", "jv-settings-content");
+      body.appendChild(content);
+      const show = (which) => {
+        usageTab.classList.toggle("active", which === "usage");
+        runtimeTab.classList.toggle("active", which === "runtime");
+        content.innerHTML = "";
+        if (which === "usage") renderUsage(content);
+        else renderRuntime(content);
+      };
+      usageTab.addEventListener("click", () => show("usage"));
+      runtimeTab.addEventListener("click", () => show("runtime"));
+      show("usage");
+    });
+  }
+  // app.js opens this from the profile-chip menu.
+  window.jevoraOpenSettings = openSettings;
 
   /* ================= Usage dashboard ================= */
 
-  async function openSettings() {
-    openModal("Settings — usage & cost", async (body) => {
-      body.appendChild(el("div", "jv-muted", "Loading usage…"));
-      let daily, byModel;
-      try {
-        daily = await tryGet("/api/usage?days=14&group_by=day");
-        byModel = await tryGet("/api/usage?days=14&group_by=model");
-      } catch (e) { body.lastChild.textContent = "Could not load usage: " + e.message; return; }
-      body.innerHTML = "";
+  async function renderUsage(container) {
+    container.appendChild(el("div", "jv-muted", "Loading usage…"));
+    let daily, byModel;
+    try {
+      daily = await tryGet("/api/usage?days=14&group_by=day");
+      byModel = await tryGet("/api/usage?days=14&group_by=model");
+    } catch (e) { container.lastChild.textContent = "Could not load usage: " + e.message; return; }
+    container.innerHTML = "";
 
-      const totals = daily.totals || {};
-      const row = el("div", "jv-usage-totals");
-      row.appendChild(usageStat("Calls", fmt(totals.calls)));
-      row.appendChild(usageStat("Tokens", fmt(totals.tokens)));
-      row.appendChild(usageStat("Cost (14d)", fmtCost(totals.cost_usd)));
-      row.appendChild(usageStat("Errors", fmt((daily.groups || []).reduce((s, g) => s + (g.errors || 0), 0))));
-      body.appendChild(row);
+    const totals = daily.totals || {};
+    const row = el("div", "jv-usage-totals");
+    row.appendChild(usageStat("Calls", fmt(totals.calls)));
+    row.appendChild(usageStat("Tokens", fmt(totals.tokens)));
+    row.appendChild(usageStat("Cost (14d)", fmtCost(totals.cost_usd)));
+    row.appendChild(usageStat("Errors", fmt((daily.groups || []).reduce((s, g) => s + (g.errors || 0), 0))));
+    container.appendChild(row);
 
-      body.appendChild(el("div", "jv-section-title", "Tokens per day (last 14 days)"));
-      const chart = el("div", "jv-chart");
-      const groups = daily.groups || [];
-      const peak = Math.max(1, ...groups.map((g) => (g.prompt_tokens || 0) + (g.completion_tokens || 0)));
-      groups.forEach((g) => {
-        const col = el("div", "jv-chart-col");
-        const tok = (g.prompt_tokens || 0) + (g.completion_tokens || 0);
-        const bar = el("div", "jv-chart-bar");
-        bar.style.height = Math.max(2, Math.round(tok / peak * 100)) + "px";
-        bar.title = `${g.key}: ${fmt(tok)} tokens · ${fmtCost(g.cost_usd)} · ${g.calls} calls`;
-        col.appendChild(bar);
-        col.appendChild(el("div", "jv-chart-label", String(g.key).slice(5)));
-        chart.appendChild(col);
-      });
-      body.appendChild(chart);
-
-      body.appendChild(el("div", "jv-section-title", "By model"));
-      const table = el("table", "jv-table");
-      table.innerHTML = "<thead><tr><th>Model</th><th>Calls</th><th>Prompt tok</th>" +
-        "<th>Completion tok</th><th>Cost</th><th>Errors</th><th>Avg latency</th></tr></thead>";
-      const tbody = el("tbody");
-      (byModel.groups || []).forEach((m) => {
-        const tr = el("tr");
-        [m.key, fmt(m.calls), fmt(m.prompt_tokens), fmt(m.completion_tokens),
-         fmtCost(m.cost_usd), fmt(m.errors), Math.round(m.avg_latency_ms || 0) + " ms"]
-          .forEach((v) => tr.appendChild(el("td", null, String(v))));
-        tbody.appendChild(tr);
-      });
-      table.appendChild(tbody);
-      body.appendChild(table);
-      if (!(byModel.groups || []).length) body.appendChild(el("div", "jv-muted", "No model calls in this period."));
+    container.appendChild(el("div", "jv-section-title", "Tokens per day (last 14 days)"));
+    const chart = el("div", "jv-chart");
+    const groups = daily.groups || [];
+    const peak = Math.max(1, ...groups.map((g) => (g.prompt_tokens || 0) + (g.completion_tokens || 0)));
+    groups.forEach((g) => {
+      const col = el("div", "jv-chart-col");
+      const tok = (g.prompt_tokens || 0) + (g.completion_tokens || 0);
+      const bar = el("div", "jv-chart-bar");
+      bar.style.height = Math.max(2, Math.round(tok / peak * 100)) + "px";
+      bar.title = `${g.key}: ${fmt(tok)} tokens · ${fmtCost(g.cost_usd)} · ${g.calls} calls`;
+      col.appendChild(bar);
+      col.appendChild(el("div", "jv-chart-label", String(g.key).slice(5)));
+      chart.appendChild(col);
     });
+    container.appendChild(chart);
+
+    container.appendChild(el("div", "jv-section-title", "By model"));
+    const table = el("table", "jv-table");
+    table.innerHTML = "<thead><tr><th>Model</th><th>Calls</th><th>Prompt tok</th>" +
+      "<th>Completion tok</th><th>Cost</th><th>Errors</th><th>Avg latency</th></tr></thead>";
+    const tbody = el("tbody");
+    (byModel.groups || []).forEach((m) => {
+      const tr = el("tr");
+      [m.key, fmt(m.calls), fmt(m.prompt_tokens), fmt(m.completion_tokens),
+       fmtCost(m.cost_usd), fmt(m.errors), Math.round(m.avg_latency_ms || 0) + " ms"]
+        .forEach((v) => tr.appendChild(el("td", null, String(v))));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    container.appendChild(table);
+    if (!(byModel.groups || []).length) container.appendChild(el("div", "jv-muted", "No model calls in this period."));
   }
 
   function usageStat(label, value) {
@@ -106,9 +145,99 @@
     return s;
   }
 
-  async function tryGet(path) {
-    const r = await api.get(path);
-    return r;
+  /* ================= Sandbox & VM runtime (WSL / Docker) ================= */
+
+  async function renderRuntime(container) {
+    container.appendChild(el("div", "jv-muted", "Checking your system for WSL and Docker…"));
+    let runtime;
+    try { runtime = await api.get("/api/system/runtime"); }
+    catch (e) { container.lastChild.textContent = "Could not load runtime status: " + e.message; return; }
+    container.innerHTML = "";
+
+    container.appendChild(el("div", "jv-muted",
+      "Builds, terminal commands and agents run inside a sandbox. Docker gives full isolation; " +
+      "without it, commands run on this machine (local mode)."));
+
+    const isWindows = runtime.platform === "win32";
+    const docker = runtime.docker || {};
+    const wsl = runtime.wsl || {};
+
+    // --- Docker card ---
+    const dockerCard = el("div", "jv-card");
+    dockerCard.appendChild(el("div", "jv-card-title", "Docker"));
+    const dockerState = docker.running ? `Running · ${docker.version || ""}`
+      : docker.installed ? "Installed, not running" : "Not installed";
+    dockerCard.appendChild(el("div", "jv-muted", dockerState + " — full isolation for agent commands and the terminal."));
+    const dockerRow = el("div", "jv-row");
+    if (docker.running) {
+      dockerRow.appendChild(el("span", "jv-ok-text", "✓ Docker is ready"));
+    } else {
+      if (docker.installed) {
+        const start = el("button", "jv-btn", "Start Docker Desktop");
+        start.addEventListener("click", () => runRuntimeAction(container, "docker_start"));
+        dockerRow.appendChild(start);
+      }
+      const download = el("button", "jv-btn jv-btn-secondary", docker.installed ? "Get Docker Desktop" : "Download Docker Desktop");
+      download.addEventListener("click", () => { try { window.open(runtime.docs.docker, "_blank", "noopener"); } catch (_) { /* popup blocked */ } });
+      dockerRow.appendChild(download);
+    }
+    const refresh1 = el("button", "jv-btn jv-btn-secondary", "Re-check");
+    refresh1.addEventListener("click", () => renderRuntime(container));
+    dockerRow.appendChild(refresh1);
+    dockerCard.appendChild(dockerRow);
+    container.appendChild(dockerCard);
+
+    // --- WSL card (Windows only) ---
+    if (isWindows) {
+      const wslCard = el("div", "jv-card");
+      wslCard.appendChild(el("div", "jv-card-title", "WSL (Windows Subsystem for Linux)"));
+      const wslState = wsl.has_distro ? "Available · Linux distro installed"
+        : wsl.available ? "Enabled, but no Linux distribution installed" : "Not installed";
+      wslCard.appendChild(el("div", "jv-muted", wslState +
+        " — Docker Desktop uses the WSL2 backend; some tooling can also run inside WSL directly."));
+      if (wsl.detail) wslCard.appendChild(el("div", "jv-muted jv-code", wsl.detail));
+      const wslRow = el("div", "jv-row");
+      if (!wsl.has_distro) {
+        const install = el("button", "jv-btn", wsl.available ? "Install Ubuntu on WSL" : "Enable WSL");
+        install.title = "Runs `wsl --install` — Windows may ask for admin permission; a restart can be required.";
+        install.addEventListener("click", () => {
+          if (!window.confirm("Enable WSL now? This runs `wsl --install`, may ask for admin permission and can require a restart.")) return;
+          runRuntimeAction(container, "wsl_install");
+        });
+        wslRow.appendChild(install);
+        const update = el("button", "jv-btn jv-btn-secondary", "Update WSL");
+        update.addEventListener("click", () => runRuntimeAction(container, "wsl_update"));
+        wslRow.appendChild(update);
+      } else {
+        wslRow.appendChild(el("span", "jv-ok-text", "✓ WSL is ready"));
+      }
+      const refresh2 = el("button", "jv-btn jv-btn-secondary", "Re-check");
+      refresh2.addEventListener("click", () => renderRuntime(container));
+      wslRow.appendChild(refresh2);
+      wslCard.appendChild(wslRow);
+      container.appendChild(wslCard);
+    }
+
+    // --- Current sandbox summary ---
+    const sandbox = runtime.sandbox || {};
+    const summary = el("div", "jv-card");
+    summary.appendChild(el("div", "jv-card-title", "Current sandbox"));
+    summary.appendChild(el("div", "jv-muted",
+      sandbox.available ? `${sandbox.kind} · image ${sandbox.image || "default"}${sandbox.mode ? ` · mode ${sandbox.mode}` : ""}`
+        : (sandbox.reason || "No sandbox available yet — install Docker or WSL above.")));
+    container.appendChild(summary);
+
+    const docsRow = el("div", "jv-muted");
+    docsRow.textContent = "Downloads open in your browser. After installing, click Re-check.";
+    container.appendChild(docsRow);
+  }
+
+  async function runRuntimeAction(container, action) {
+    try {
+      const result = await api.post("/api/system/runtime/enable", { action });
+      toast(result.message || (result.ok ? "Done" : "The step did not succeed — see the message."));
+      renderRuntime(container);
+    } catch (e) { toast("Action failed: " + e.message); }
   }
 
   /* ================= Agent permissions editor ================= */
@@ -134,7 +263,8 @@
     const granted = new Set(current || []);
     openModal(`Permissions — ${agentName}`, (body) => {
       body.appendChild(el("div", "jv-muted",
-        "Agents only see tools whose permission they hold; subagents inherit the intersection with their parent."));
+        "Agents only see tools whose permission they hold; subagents inherit the intersection with their parent. " +
+        "Grant fs.read / fs.write to let an agent read and create files in the workspace."));
       const grid = el("div", "jv-perm-grid");
       groupByPermission(tools).forEach(([prefix, items]) => {
         const group = el("div", "jv-perm-group");
@@ -164,40 +294,20 @@
           await api.patch(`/api/agents/${agentId}`, { tool_permissions: perms });
           toast("Permissions saved");
           closeModal();
-          if (typeof loadAgents === "function") loadAgents();
+          if (typeof window.loadAgents === "function") window.loadAgents();
         } catch (e) { toast("Save failed: " + e.message); }
       });
       body.appendChild(save);
     });
   };
 
-  function toast(msg) {
-    const t = document.querySelector(".toast-container");
-    if (!t) return;
-    const n = el("div", "toast", msg);
-    t.appendChild(n);
-    setTimeout(() => n.remove(), 3500);
-  }
-
   /* ================= integration: profile menu + agent list ================= */
 
   function wire() {
-    // Settings entry in the profile menu: app.js rebuilds the menu each click,
-    // so intercept at the container level via a MutationObserver-free approach:
-    document.addEventListener("click", (e) => {
-      const menu = document.querySelector(".profile-menu");
-      if (!menu || menu.querySelector(".pm-settings") || !menu.contains(e.target) && e.target.id !== "profileChip"
-          && !menu.contains(e.target)) return;
-      if (menu.querySelector(".pm-settings")) return;
-      const settings = el("button", "chip-btn pm-settings", "Settings & usage");
-      settings.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        menu.remove();
-        openSettings();
-      });
-      const signout = menu.querySelector("button");
-      menu.insertBefore(settings, signout);
-    }, true);
+    if (!window.api) return; // app.js must have booted (same tick order)
+    api = window.api;
+    // The profile menu (app.js) renders a .pm-settings button that calls
+    // window.jevoraOpenSettings (exposed above); no interception needed here.
 
     // Permissions buttons on agent list items (delegated; survives re-renders)
     const agentList = document.getElementById("agentList");
@@ -224,6 +334,12 @@
   const css = document.createElement("style");
   css.textContent =
     ".jv-modal-wide{width:min(760px,94vw)}" +
+    ".jv-tabs{display:flex;gap:6px;margin-bottom:12px}" +
+    ".jv-tab{border:1px solid #e6e6ee;background:#fff;border-radius:999px;padding:6px 14px;" +
+    "font:600 12px system-ui,sans-serif;color:#4b5563;cursor:pointer}" +
+    ".jv-tab.active{background:#312e81;border-color:#312e81;color:#fff}" +
+    ".jv-settings-content{min-height:200px}" +
+    ".jv-ok-text{color:#047857;font:600 12px system-ui,sans-serif;align-self:center}" +
     ".jv-usage-totals{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}" +
     ".jv-usage-stat{border:1px solid #e6e6ee;border-radius:10px;padding:10px;text-align:center}" +
     ".jv-usage-value{font-size:18px;font-weight:700}" +

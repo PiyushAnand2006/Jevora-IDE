@@ -147,18 +147,19 @@ async def finalize(o: Orchestrator, state: GraphState) -> dict[str, Any]:
 
 
 async def _save_conversation(o: Orchestrator, state: GraphState, output: str) -> None:
-    if state["mode"] != "chat":
-        return
+    # Every mode persists its transcript, not just chat: build/research/analysis
+    # runs must appear in history with their user task and final output.
     rc = ctx_for(o, state)
     async with o.app.sessions() as session:
         run = await session.get(Run, rc.run_id)
         conversation_id = state.get("conversation_id") or (run.conversation_id if run else None)
         if conversation_id:
-            conversation = await owned_conversation(session, rc.user_id, conversation_id, "chat")
+            conversation = await owned_conversation(session, rc.user_id, conversation_id)
         else:
             # Compatibility for pre-conversation runs/checkpoints. New runs allocate
             # their conversation before scheduling; retries reuse the ID on the run.
-            conversation = Conversation(user_id=rc.user_id, title=state["task"][:120], mode="chat")
+            conversation = Conversation(user_id=rc.user_id, title=state["task"][:120],
+                                        mode=state.get("mode") or "chat")
             session.add(conversation)
             await session.flush()
         await save_message(session, conversation, rc.run_id, "user", state["task"])
