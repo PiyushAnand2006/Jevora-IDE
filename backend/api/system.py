@@ -211,9 +211,11 @@ async def runtime_enable(body: RuntimeAction, user: CurrentUser, ctx: Ctx) -> di
                            code="docker_not_installed", status_code=404)
         try:
             # Launch detached so the backend never owns the Docker Desktop process.
-            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            subprocess.Popen([desktop], cwd=str(Path(desktop).parent), creationflags=creationflags,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            await asyncio.to_thread(
+                subprocess.Popen, [desktop], cwd=str(Path(desktop).parent), creationflags=creationflags,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError as exc:
             raise AppError(f"could not launch Docker Desktop: {exc}", code="docker_launch_failed",
                            status_code=500) from exc

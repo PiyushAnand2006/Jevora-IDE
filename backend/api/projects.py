@@ -10,6 +10,7 @@ Two ways to make a project:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 from typing import Any
@@ -70,12 +71,12 @@ async def open_project(body: ProjectOpen, user: CurrentUser, ctx: Ctx) -> dict[s
     raw = body.path.strip().strip('"')
     if not raw:
         raise AppError("folder path is required", code="invalid_path", status_code=422)
-    folder = Path(raw).expanduser()
+    folder = await asyncio.to_thread(lambda: Path(raw).expanduser())
     if not folder.is_absolute():
         raise AppError("folder path must be absolute", code="invalid_path", status_code=422)
-    if not folder.is_dir():
+    if not await asyncio.to_thread(folder.is_dir):
         raise AppError(f"'{raw}' is not a folder on this machine", code="folder_not_found", status_code=404)
-    resolved = str(folder.resolve())
+    resolved = str(await asyncio.to_thread(folder.resolve))
     name = folder.name or "Project"
     async with ctx.sessions() as session:
         existing = await session.scalar(select(Workspace).where(
