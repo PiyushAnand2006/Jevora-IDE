@@ -341,7 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   conversationRenameBtn?.addEventListener('click', async () => {
     if (!conversationId || conversationRenameBtn.disabled) return;
-    const next = window.prompt('Conversation name', activeConversationTitle || 'Conversation');
+    const next = await askText('Conversation name', activeConversationTitle || 'Conversation');
     if (next === null) return;
     const title = next.trim();
     if (!title) { showToast('Conversation name cannot be empty'); return; }
@@ -380,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await loadProjects();
     if (!projectsCache.length) { showToast('Create a project first (Projects → +)'); return; }
     const list = projectsCache.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
-    const answer = window.prompt(`Move this chat to which project?\n\n${list}\n\nEnter a number (empty = remove from its project):`, '1');
+    const answer = await askText(`Move this chat to which project? ${list} (empty = remove from its project)`, '1');
     if (answer === null) return;
     const trimmed = answer.trim();
     let projectId = null;
@@ -773,7 +773,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  /** @-tokens in the message text; the backend inlines their contents as context. */
+  /** Electron has no window.prompt — an in-page dialog keeps these flows working. */
+  function askText(label, placeholder = '') {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'asktext-overlay';
+      overlay.innerHTML = `
+        <div class="asktext-box">
+          <div class="asktext-label"></div>
+          <input class="asktext-input" type="text" autocomplete="off" />
+          <div class="asktext-actions">
+            <button class="asktext-cancel" type="button">Cancel</button>
+            <button class="asktext-ok primary" type="button">OK</button>
+          </div>
+        </div>`;
+      overlay.querySelector('.asktext-label').textContent = label;
+      const input = overlay.querySelector('.asktext-input');
+      input.placeholder = placeholder;
+      const done = (value) => { overlay.remove(); resolve(value); };
+      overlay.querySelector('.asktext-ok').addEventListener('click', () => done(input.value.trim()));
+      overlay.querySelector('.asktext-cancel').addEventListener('click', () => done(null));
+      overlay.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') done(input.value.trim());
+        if (e.key === 'Escape') done(null);
+      });
+      document.body.appendChild(overlay);
+      input.focus();
+    });
+  }
+
+  /** Confirm works in Electron, but keep a single helper for consistency. */
+  function askConfirm(message) { return window.confirm(message); }
+
+  /** Open an existing folder as a project — native picker in the desktop shell. */
+  async function pickFolderPath() {
+    if (window.jevora?.chooseFolder) return window.jevora.chooseFolder();
+    return askText('Folder path to open as a project', 'C:\\path\\to\\project');
+  }
+
+  /** Extract @-tokens from the message text; the backend inlines their contents. */
   function extractMentions(text) {
     const out = new Set();
     for (const match of text.matchAll(/(?:^|\s)@([^\s@]+)/g)) {
@@ -827,7 +865,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bubble.innerHTML = `<div class="bubble-content">${attachmentMarkup}<div>${escapeHtml(text || 'Attached context')}</div>${messageId ? '<div class="message-actions"><button type="button" class="message-action-btn" data-action="edit">Edit</button></div>' : ''}</div>`;
     if (messageId) {
       bubble.querySelector('[data-action="edit"]')?.addEventListener('click', async () => {
-        const next = window.prompt('Edit message', text);
+        const next = await askText('Edit message', text);
         if (next === null || !next.trim()) return;
         try {
           const edited = await api.post(`/api/conversations/${encodeURIComponent(conversationId)}/edit`, {
@@ -1221,7 +1259,7 @@ document.addEventListener('DOMContentLoaded', () => {
           chip.textContent = p.split('/').pop();
           chip.title = p;
           chip.addEventListener('click', () => {
-            if (window.jevoraOpenEditor) window.jevoraOpenEditor(p);
+            if (window.jevoraOpenEditor) window.jevoraOpenEditor(p, run.workspace_id);
             else showToast('The editor is unavailable in this view');
           });
           row.appendChild(chip);
@@ -1914,7 +1952,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function createProjectFlow() {
-    const name = window.prompt('New project name', '');
+    const name = await askText('New project name', 'my-project');
     if (name === null) return;
     const trimmed = name.trim();
     if (!trimmed) { showToast('Project name cannot be empty'); return; }
@@ -1934,7 +1972,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.jevora?.chooseFolder) {
       path = await window.jevora.chooseFolder();
     } else {
-      path = window.prompt('Folder path to open as a project', project?.root_path || '');
+      path = await pickFolderPath();
     }
     if (!path) return;
     try {
@@ -2246,12 +2284,12 @@ document.addEventListener('DOMContentLoaded', () => {
               const img = await api.get(`${base}/screenshot`);
               shot().innerHTML = `<img src="data:image/png;base64,${img.b64_png}" alt="session screenshot">`;
             } else if (act === 'navigate') {
-              const url = window.prompt('Navigate to URL');
+              const url = await askText('Navigate to URL', 'http://localhost:3000');
               if (!url) return;
               await api.post(`${base}/action`, { action: { action: 'navigate', url } });
               showToast('Navigated');
             } else if (act === 'assert') {
-              const value = window.prompt('Text that should be visible on the page');
+              const value = await askText('Text that should be visible on the page');
               if (!value) return;
               const result = await api.post(`${base}/assert`, { type: 'text_visible', value });
               showToast(`${result.passed ? 'PASS' : 'FAIL'}: ${result.name} ${result.detail || ''}`.trim());
@@ -2368,7 +2406,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('vaultMoveBtn').addEventListener('click', async () => {
       let path = null;
       if (window.jevora?.chooseFolder) path = await window.jevora.chooseFolder();
-      else path = window.prompt('Vault folder path', data.vault || '');
+      else path = await pickFolderPath();
       if (!path) return;
       try { await api.put('/api/vault/config', { path }); showToast('Vault location updated'); renderVaultDrawer(); }
       catch (error) { showToast(`Could not move the vault: ${error.message}`); }

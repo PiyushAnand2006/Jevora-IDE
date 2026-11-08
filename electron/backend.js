@@ -99,14 +99,15 @@ class BackendManager extends EventEmitter {
   /** The fixed launch plan: two literal argv arrays, one of two executables. */
   _launchPlan(port, userDataDir) {
     const dataDir = path.join(userDataDir, "data");
+    // environment overrides win (isolated test sessions, custom locations);
+    // the SQLite default always derives from the effective data dir
+    const effDataDir = process.env.DATA_DIR ?? dataDir;
     const sharedEnv = {
       JEVORA_HOST: "127.0.0.1",
       JEVORA_PORT: String(port),
-      DATA_DIR: dataDir,
-      WORKSPACE_ROOT: path.join(userDataDir, "workspace"),
-      // durable local store inside the profile dir unless the user opted into
-      // something else (Postgres) via their own environment
-      DATABASE_URL: process.env.DATABASE_URL ?? `sqlite+aiosqlite:///${dataDir.replace(/\\/g, "/")}/jevora.db`,
+      DATA_DIR: effDataDir,
+      WORKSPACE_ROOT: process.env.WORKSPACE_ROOT ?? path.join(userDataDir, "workspace"),
+      DATABASE_URL: process.env.DATABASE_URL ?? `sqlite+aiosqlite:///${effDataDir.replace(/\\/g, "/")}/jevora.db`,
       BROWSER_CONTROL_ENABLED: process.env.BROWSER_CONTROL_ENABLED ?? "true",
       BROWSER_DCOM_ENABLED: process.env.BROWSER_DCOM_ENABLED ?? "true",
       BROWSER_DESKTOP_CAPTURE_ENABLED: process.env.BROWSER_DESKTOP_CAPTURE_ENABLED ?? "true",
@@ -115,7 +116,8 @@ class BackendManager extends EventEmitter {
       // dev shares the repo's local data so the desktop app and a separately
       // started web server see the same users/runs (the packaged app uses the
       // OS profile dir instead)
-      const dataDir = path.join(repoRoot(), ".jevora-data");
+      const devDataDir = path.join(repoRoot(), ".jevora-data");
+      const devEffDataDir = process.env.DATA_DIR ?? devDataDir;
       return {
         cmd: venvPython(),
         // literal argv; variability travels only through env
@@ -124,9 +126,10 @@ class BackendManager extends EventEmitter {
         env: {
           ...process.env,
           ...sharedEnv,
-          DATA_DIR: dataDir,
-          WORKSPACE_ROOT: path.join(repoRoot(), "workspace"),
-          DATABASE_URL: process.env.DATABASE_URL ?? `sqlite+aiosqlite:///${dataDir.replace(/\\/g, "/")}/jevora.db`,
+          DATA_DIR: devEffDataDir,
+          WORKSPACE_ROOT: process.env.WORKSPACE_ROOT ?? path.join(repoRoot(), "workspace"),
+          DATABASE_URL:
+            process.env.DATABASE_URL ?? `sqlite+aiosqlite:///${devEffDataDir.replace(/\\/g, "/")}/jevora.db`,
           PYTHONPATH: repoRoot(),
           FRONTEND_DIR: path.join(repoRoot(), "frontend"),
         },

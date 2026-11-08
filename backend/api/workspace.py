@@ -24,6 +24,21 @@ def guard_for(ctx: AppContext) -> WorkspaceGuard:
     return WorkspaceGuard(ctx.settings.workspace_root)
 
 
+async def guard_for_id(ctx: AppContext, user, workspace_id: str | None) -> WorkspaceGuard:
+    """Guard rooted at the user's project folder when workspace_id is given."""
+    if not workspace_id:
+        return guard_for(ctx)
+    from sqlalchemy import select as _select
+
+    from backend.db.models import Workspace as _Workspace
+
+    async with ctx.sessions() as session:
+        ws = await session.get(_Workspace, workspace_id)
+    if ws is None or ws.user_id != user.id:
+        raise AppError("project not found", code="project_not_found", status_code=404)
+    return WorkspaceGuard(Path(ws.root_path))
+
+
 def _node(guard: WorkspaceGuard, path: Path, depth: int, budget: list[int]) -> dict[str, Any]:
     rel = guard.relative(path)
     if path.is_dir():
@@ -71,8 +86,9 @@ async def tree(user: CurrentUser, ctx: Ctx, path: str = Query("."), depth: int =
 
 
 @router.get("/file", response_model=None)
-async def read_file(user: CurrentUser, ctx: Ctx, path: str = Query(...), raw: bool = False) -> Any:
-    guard = guard_for(ctx)
+async def read_file(user: CurrentUser, ctx: Ctx, path: str = Query(...), raw: bool = False,
+                    workspace: str | None = Query(None, max_length=64)) -> Any:
+    guard = await guard_for_id(ctx, user, workspace)
     target = guard.resolve(path)
     if not target.is_file():
         raise NotFound(f"{path} is not a file")
@@ -97,8 +113,9 @@ class FileWrite(BaseModel):
 
 
 @router.put("/file")
-async def write_file(body: FileWrite, user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
-    guard = guard_for(ctx)
+async def write_file(body: FileWrite, user: CurrentUser, ctx: Ctx,
+                     workspace: str | None = Query(None, max_length=64)) -> dict[str, Any]:
+    guard = await guard_for_id(ctx, user, workspace)
     target = guard.resolve(body.path, for_write=True)
     if target.is_dir():
         raise AppError(f"{body.path} is a directory", code="is_directory", status_code=422)
@@ -116,8 +133,9 @@ async def write_file(body: FileWrite, user: CurrentUser, ctx: Ctx) -> dict[str, 
 
 
 @router.delete("/file")
-async def delete_file(user: CurrentUser, ctx: Ctx, path: str = Query(...)) -> dict[str, Any]:
-    guard = guard_for(ctx)
+async def delete_file(user: CurrentUser, ctx: Ctx, path: str = Query(...),
+                      workspace: str | None = Query(None, max_length=64)) -> dict[str, Any]:
+    guard = await guard_for_id(ctx, user, workspace)
     target = guard.resolve(path, for_write=True)
     if not target.is_file():
         raise NotFound(f"{path} is not a file")

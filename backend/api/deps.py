@@ -63,6 +63,18 @@ async def get_current_user(request: Request) -> User:
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def get_current_user_optional(request: Request) -> User | None:
+    """Resolved user, or None when unauthenticated — for endpoints that must answer
+    without a session (the desktop shell's health probe runs before any login)."""
+    try:
+        return await get_current_user(request)
+    except Exception:
+        return None
+
+
+CurrentUserOptional = Annotated[User | None, Depends(get_current_user_optional)]
+
+
 async def ws_user(websocket: WebSocket) -> User:
     ctx: AppContext = websocket.app.state.ctx
     token = websocket.query_params.get("token") or _bearer(websocket.headers.get("authorization"))

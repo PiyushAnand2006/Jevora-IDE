@@ -23,7 +23,8 @@
   const toggleBtn = document.getElementById("editorToggleBtn");
   if (!host || !tabsEl || !treeHost || !workspace || !toggleBtn) return;
 
-  const state = { tabs: new Map(), active: null, monaco: null, editor: null, treeLoaded: false, ready: null };
+  const state = { tabs: new Map(), active: null, monaco: null, editor: null, treeLoaded: false, ready: null,
+                  workspace: null };
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -91,10 +92,10 @@
     tabsEl.appendChild(actions);
   }
 
-  function activate(path) {
-    const tab = state.tabs.get(path);
+  function activate(key) {
+    const tab = state.tabs.get(key);
     if (!tab) return;
-    state.active = path;
+    state.active = key;
     if (tab.textarea) {
       host.querySelectorAll(".editor-fallback").forEach((n) => n.remove());
       host.appendChild(tab.textarea);
@@ -107,15 +108,19 @@
     renderTabs();
   }
 
-  async function openTab(path) {
-    let tab = state.tabs.get(path);
+  async function openTab(path, workspaceId) {
+    if (workspaceId !== undefined) state.workspace = workspaceId;
+    const wsParam = state.workspace ? `&workspace=${encodeURIComponent(state.workspace)}` : "";
+    let tab = state.tabs.get(path + wsParam);
+    const tabKey = path + wsParam;
     if (!tab) {
       let file;
-      try { file = await api.get(`/api/workspace/file?path=${encodeURIComponent(path)}`); }
+      try { file = await api.get(`/api/workspace/file?path=${encodeURIComponent(path)}${wsParam}`); }
       catch (e) { toast(`Could not open ${path}: ${e.message}`); return; }
       if (file.binary) { toast(`${path} is binary — use the file drawer to download it`); return; }
-      tab = { original: file.content, dirty: false, label: path.split("/").pop(), textarea: null, model: null };
-      state.tabs.set(path, tab);
+      tab = { original: file.content, dirty: false, label: path.split("/").pop(), textarea: null, model: null,
+              path, ws: state.workspace };
+      state.tabs.set(tabKey, tab);
       const hasMonaco = await loadMonaco();
       if (hasMonaco) {
         state.monaco = window.monaco;
@@ -136,15 +141,15 @@
       }
     }
     showWorkspace();
-    activate(path);
+    activate(tabKey);
   }
 
-  async function saveTab(path) {
-    const tab = state.tabs.get(path);
+  async function saveTab(key) {
+    const tab = state.tabs.get(key);
     if (!tab || !tab.dirty) return;
     const value = tab.textarea ? tab.textarea.value : tab.model.getValue();
     try {
-      await api.put("/api/workspace/file", { path, content: value });
+      await api.put("/api/workspace/file", { path: tab.path, content: value, workspace: tab.ws || undefined });
       tab.original = value;
       tab.dirty = false;
       renderTabs();
@@ -154,14 +159,14 @@
 
   function saveActive() { if (state.active) saveTab(state.active); }
 
-  function closeTab(path) {
-    const tab = state.tabs.get(path);
+  function closeTab(key) {
+    const tab = state.tabs.get(key);
     if (!tab) return;
-    if (tab.dirty && !window.confirm(`${path} has unsaved changes. Close anyway?`)) return;
+    if (tab.dirty && !window.confirm(`${tab.path} has unsaved changes. Close anyway?`)) return;
     if (tab.model) tab.model.dispose();
     if (tab.textarea) tab.textarea.remove();
-    state.tabs.delete(path);
-    if (state.active === path) {
+    state.tabs.delete(key);
+    if (state.active === key) {
       state.active = null;
       const next = state.tabs.keys().next();
       if (!next.done) activate(next.value);
@@ -183,7 +188,7 @@
         const item = el("button", "editor-tree-file", node.name);
         item.type = "button";
         item.title = node.path;
-        if (node.path === state.active) item.classList.add("active");
+        if ((node.path + (state.tabs.get(node.path)?.ws ? "" : "")) === state.active) item.classList.add("active");
         item.addEventListener("click", () => openTab(node.path));
         container.appendChild(item);
         return;
@@ -235,7 +240,7 @@
   };
 
   /** Overrides panels.js's modal: files open as editor tabs. */
-  window.jevoraOpenEditor = function (path) { openTab(path); };
+  window.jevoraOpenEditor = function (path, workspaceId) { openTab(path, workspaceId); };
 
   function toast(msg) {
     const container = document.querySelector(".toast-container");

@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select, text
 
 from backend import __version__
-from backend.api.deps import Ctx, CurrentUser
+from backend.api.deps import Ctx, CurrentUser, CurrentUserOptional
 from backend.app_context import AppContext
 from backend.core.errors import AppError
 from backend.core.ids import iso, utcnow
@@ -42,7 +42,7 @@ async def _provider_reachability(ctx: AppContext, user_id: str) -> list[dict[str
     return list(await asyncio.gather(*(probe(p) for p in providers)))
 
 
-async def build_health(ctx: AppContext, user_id: str, probe_providers: bool = True) -> dict[str, Any]:
+async def build_health(ctx: AppContext, user_id: str | None, probe_providers: bool = True) -> dict[str, Any]:
     db_ok = True
     try:
         async with ctx.sessions() as session:
@@ -55,7 +55,9 @@ async def build_health(ctx: AppContext, user_id: str, probe_providers: bool = Tr
         "time": iso(utcnow()),
         "database": {"ok": db_ok},
         "auth_required": ctx.settings.auth_required,
-        "providers": await _provider_reachability(ctx, user_id) if probe_providers else [],
+        # per-provider reachability needs a signed-in user; the desktop shell's
+        # startup probe runs before any login and gets the shallow view
+        "providers": await _provider_reachability(ctx, user_id) if user_id and probe_providers else [],
     }
     for name, component in ctx.extras.get("health_components", {}).items():
         try:
@@ -66,8 +68,9 @@ async def build_health(ctx: AppContext, user_id: str, probe_providers: bool = Tr
 
 
 @router.get("/api/system/health")
-async def system_health(user: CurrentUser, ctx: Ctx, probe: bool = Query(True)) -> dict[str, Any]:
-    return await build_health(ctx, user.id, probe_providers=probe)
+async def system_health(user: CurrentUserOptional, ctx: Ctx, probe: bool = Query(True)) -> dict[str, Any]:
+    # unauthenticated callers (the desktop shell's startup probe) get the shallow view
+    return await build_health(ctx, user.id if user else None, probe_providers=probe and user is not None)
 
 
 @router.get("/api/features")
