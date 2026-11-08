@@ -125,13 +125,24 @@ document.addEventListener('DOMContentLoaded', () => {
       if (token) localStorage.setItem(TOKEN_KEY, token); else localStorage.removeItem(TOKEN_KEY);
     },
     async refresh() {
+      // Single-flight: parallel 401s must share one refresh call. Two refreshes
+      // presenting the same rotated token look like token theft and would
+      // revoke the whole session family.
+      if (this._refreshPromise) return this._refreshPromise;
+      this._refreshPromise = (async () => {
+        try {
+          const response = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' });
+          if (!response.ok) { this.setToken(null); return false; }
+          const data = await response.json();
+          this.setToken(data.access_token);
+          return true;
+        } catch (_) { return false; }
+      })();
       try {
-        const response = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' });
-        if (!response.ok) { this.setToken(null); return false; }
-        const data = await response.json();
-        this.setToken(data.access_token);
-        return true;
-      } catch (_) { return false; }
+        return await this._refreshPromise;
+      } finally {
+        this._refreshPromise = null;
+      }
     },
     async request(method, path, body, options = {}) {
       const headers = {};
@@ -142,7 +153,9 @@ document.addEventListener('DOMContentLoaded', () => {
         payload = JSON.stringify(body);
       }
       const response = await fetch(path, { method, headers, body: payload, credentials: 'same-origin' });
-      if (response.status === 401 && !options.retried && !path.startsWith('/api/auth/')) {
+      // Self-heal an expired access token on any endpoint except the refresh
+      // call itself (retrying /me here is what restores the session on restart).
+      if (response.status === 401 && !options.retried && !path.startsWith('/api/auth/refresh')) {
         const refreshed = await this.refresh();
         if (!refreshed) this.setToken(null);
         if (refreshed || this.token === null) return this.request(method, path, body, { ...options, retried: true });
@@ -2773,6 +2786,10 @@ document.addEventListener('DOMContentLoaded', () => {
       await api.refresh();
       window.history.replaceState({}, '', window.location.pathname);
     }
+    // localStorage is origin-scoped INCLUDING the port, and the backend port can
+    // change between launches — heal a lost token from the refresh cookie so a
+    // signed-in user stays signed in across restarts.
+    if (!api.token) await api.refresh();
     try {
       currentUser = await api.get('/api/auth/me');
       loadSavedProviders();

@@ -209,6 +209,17 @@ async def test_auth_flow_in_browser(tmp_path: Path) -> None:
             page.click("#submitBtn")
             page.wait_for_selector("#authMessage.error")
             assert "invalid email or password" in page.inner_text("#authMessage").lower()
+
+            # Sign back in, then simulate a restart with a lost/expired access
+            # token: the refresh cookie must restore the session (no logout).
+            page.fill("#emailInput", "ada@example.com")
+            page.fill("#passwordInput", "analytical-engine")
+            page.click("#submitBtn")
+            page.wait_for_url("**/index.html")
+            page.evaluate("localStorage.setItem('jevora_access_token', 'corrupted-expired-token')")
+            page.goto(server.url + "/index.html", wait_until="networkidle")
+            page.wait_for_selector("#profileChip:not([hidden])")
+            assert "ada@example.com" in page.inner_text(".sidebar-user")
             browser.close()
         return errors
 

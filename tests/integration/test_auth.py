@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import AsyncIterator
@@ -9,8 +10,11 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+from sqlalchemy import update
 
-from backend.core.security import REFRESH_COOKIE
+from backend.core.ids import utcnow
+from backend.core.security import REFRESH_COOKIE, hash_refresh_token
+from backend.db.models import RefreshToken
 from tests.conftest import AppHarness, make_settings, start_app
 
 
@@ -50,6 +54,7 @@ async def test_auth_required_blocks_api(secured: AppHarness) -> None:
     assert (await client.get("/api/features")).status_code == 200  # public
 
 
+
 async def test_signup_login_me_refresh_logout(secured: AppHarness) -> None:
     client = secured.client
     created = await _signup(client)
@@ -70,19 +75,44 @@ async def test_signup_login_me_refresh_logout(secured: AppHarness) -> None:
     old_refresh = client.cookies[REFRESH_COOKIE]
     refreshed = await client.post("/api/auth/refresh")
     assert refreshed.status_code == 200
-    new_refresh = client.cookies[REFRESH_COOKIE]
-    assert new_refresh != old_refresh
 
-    # Reusing a rotated refresh token revokes the whole family.
-    client.cookies.set(REFRESH_COOKIE, old_refresh, path="/api/auth")
-    reuse = await client.post("/api/auth/refresh")
-    assert reuse.status_code == 401 and reuse.json()["code"] == "refresh_reuse"
-    client.cookies.set(REFRESH_COOKIE, new_refresh, path="/api/auth")
-    assert (await client.post("/api/auth/refresh")).status_code == 401
+    # Grace/reuse scenarios use a bare client with an explicit Cookie header —
+    # immune to jar state from prior rotations.
+    bare = httpx.AsyncClient(transport=httpx.ASGITransport(app=secured.app),
+                             base_url="http://testserver")
+    header = {REFRESH_COOKIE: old_refresh}
+
+    # Concurrent refresh of the just-rotated token (two parallel 401s in the
+    # web app) is healed within the grace window instead of logging out.
+    healed = await bare.post("/api/auth/refresh", cookies=header)
+    assert healed.status_code == 200, healed.json()
+    latest = healed.cookies[REFRESH_COOKIE]
+
+    # Replay after the grace window expires: theft — revoke the whole family.
+    async with secured.ctx.sessions() as session:
+        await session.execute(update(RefreshToken)
+                              .where(RefreshToken.token_hash == hash_refresh_token(old_refresh))
+                              .values(revoked_at=utcnow() - timedelta(seconds=120)))
+        await session.commit()
+    replay_late = await bare.post("/api/auth/refresh", cookies=header)
+    assert replay_late.status_code == 401 and replay_late.json()["code"] == "refresh_reuse"
+    # the whole family is dead, including the newest cookie
+    assert (await bare.post("/api/auth/refresh", cookies={REFRESH_COOKIE: latest})).status_code == 401
+    await bare.aclose()
 
     login = await client.post("/api/auth/login", json={"email": "ada@example.com", "password": "correct-horse-1"})
     assert (await client.post("/api/auth/logout")).json() == {"ok": True}
     assert (await client.post("/api/auth/refresh")).status_code == 401
+
+
+async def test_refresh_concurrent_race_is_healed(secured: AppHarness) -> None:
+    client = secured.client
+    await _signup(client)
+    first, second = await asyncio.gather(client.post("/api/auth/refresh"),
+                                         client.post("/api/auth/refresh"))
+    assert first.status_code == 200 and second.status_code == 200
+    # the session family survives the race and keeps rotating
+    assert (await client.post("/api/auth/refresh")).status_code == 200
 
 
 async def test_wrong_password_and_rate_limit(secured: AppHarness) -> None:

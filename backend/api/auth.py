@@ -40,6 +40,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 OAUTH_PROVIDERS = ("google", "github")
+# Concurrent refreshes presenting the same just-rotated token heal instead of
+# revoking the session family; replays after this window are still theft.
+REFRESH_REUSE_GRACE_S = 30
 
 
 def _normalize_email(value: str) -> str:
@@ -265,7 +268,16 @@ async def refresh(request: Request, response: Response, ctx: Ctx) -> dict[str, A
         if token is None:
             raise Unauthorized("invalid refresh token", code="invalid_refresh_token")
         if token.revoked_at is not None:
-            # Reuse of a rotated token: assume theft and revoke the whole family.
+            # Concurrent-refresh race: two parallel requests can present the same
+            # just-rotated token. Re-issuing within a short grace window heals the
+            # race; a replay after it is still treated as theft and kills the family.
+            if token.revoked_at >= utcnow() - timedelta(seconds=REFRESH_REUSE_GRACE_S):
+                active = await session.scalar(select(RefreshToken).where(
+                    RefreshToken.family_id == token.family_id, RefreshToken.revoked_at.is_(None),
+                    RefreshToken.expires_at > utcnow()))
+                user = await session.get(User, token.user_id) if active is not None else None
+                if user is not None:
+                    return await _issue_session(ctx, user, response, request, family_id=token.family_id)
             await session.execute(update(RefreshToken).where(RefreshToken.family_id == token.family_id)
                                   .values(revoked_at=utcnow()))
             await session.commit()
