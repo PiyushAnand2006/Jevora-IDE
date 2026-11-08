@@ -51,24 +51,43 @@ async def test_workspace_tree_file_write_and_changes(harness: AppHarness) -> Non
 
 # --------------------------------------------------------------------------- terminal
 def test_terminal_pty_roundtrip(tmp_path: Path) -> None:
+    import threading
+
     app = create_app(make_settings(tmp_path))
     with TestClient(app) as client, client.websocket_connect("/api/terminal?cols=100&rows=30") as ws:
         ready = ws.receive_json()
         assert ready["type"] == "ready" and ready["sandbox"]["kind"] == "local"
         ws.send_json({"type": "resize", "cols": 120, "rows": 40})
-        ws.send_json({"type": "stdin", "data": "echo jevora-pty-ok\r"})
         # An interactive PowerShell renders typed characters through PSReadLine
         # with ANSI cursor codes interleaved, so match on ANSI-stripped output.
+        # A cold pwsh can take a while before PSReadLine accepts input — nudge
+        # the command periodically until the executed output shows up.
         ansi = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
         seen = ""
-        deadline = time.time() + 20
+        found = threading.Event()
+
+        def nudge() -> None:
+            for _ in range(4):
+                if found.wait(9):
+                    return
+                try:
+                    ws.send_json({"type": "stdin", "data": "echo jevora-pty-ok\r"})
+                except Exception:
+                    return
+
+        ws.send_json({"type": "stdin", "data": "echo jevora-pty-ok\r"})
+        threading.Thread(target=nudge, daemon=True).start()
+        deadline = time.time() + 45
         while time.time() < deadline:
             message = ws.receive_json()
             if message["type"] == "stdout":
                 seen += message["data"]
                 if "jevora-pty-ok" in ansi.sub("", seen).replace("echo jevora-pty-ok", ""):
+                    found.set()
                     break
-        assert "jevora-pty-ok" in ansi.sub("", seen).replace("echo jevora-pty-ok", "")
+        found.set()
+        assert "jevora-pty-ok" in ansi.sub("", seen).replace("echo jevora-pty-ok", ""), \
+            f"no roundtrip within 45 s; last output: {ansi.sub('', seen)[-400:]!r}"
 
 
 def test_terminal_reports_unavailable_sandbox(tmp_path: Path) -> None:
