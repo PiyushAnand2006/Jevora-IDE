@@ -72,3 +72,6 @@ antigravity_*.txt
 inject_model.py
 model_addition.txt
 .tmpe2e/
+
+# End-to-end test environment (isolated data/workspace for the desktop app)
+.e2e-env/
