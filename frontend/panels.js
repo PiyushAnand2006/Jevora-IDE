@@ -288,8 +288,24 @@
       catch (_) { body.lastChild.textContent = "Could not load the diff."; return; }
       body.innerHTML = "";
       const stats = data.stats || {};
+      const changed = stats.files_changed ?? stats.files ?? 0;
       body.appendChild(el("div", "jv-muted",
-        `${stats.files_changed ?? stats.files ?? 0} file(s) changed · +${stats.insertions ?? 0} −${stats.deletions ?? 0}`));
+        `${changed} file(s) changed · +${stats.insertions ?? stats.additions ?? 0} −${stats.deletions ?? 0}`));
+      if (changed) {
+        // Undo everything this run wrote, back to the pre-run snapshot.
+        const revert = el("button", "jv-btn jv-btn-danger", "Revert these changes");
+        revert.title = "Restore the workspace to the state captured before this run";
+        revert.addEventListener("click", async () => {
+          if (!window.confirm("Restore the workspace to the state before this run? Files the run created are deleted; edited files are restored.")) return;
+          try {
+            const r = await tryApi("POST", `/api/runs/${runId}/revert`);
+            toast(`Reverted: ${r.restored.length} restored, ${r.deleted.length} deleted` +
+              (r.skipped.length ? `, ${r.skipped.length} skipped (binary/locked)` : ""));
+            closeModal();
+          } catch (e) { toast("Revert failed: " + e.message); }
+        });
+        body.appendChild(revert);
+      }
       const pre = el("pre", "jv-diff");
       const diff = data.diff || "(no changes)";
       diff.split("\n").forEach((line) => {

@@ -109,6 +109,9 @@ class Settings(BaseSettings):
     run_time_budget_s: int = 1800
     run_cost_budget_usd: float = 5.0
     max_prompt_chars: int = 100_000
+    # Commit verified build-mode work on the workspace's current branch when it
+    # is a git repository (never initialises one). Author: "Jevora Agent".
+    auto_commit: bool = True
 
     # ---- sandbox --------------------------------------------------------------------
     sandbox_mode: Literal["auto", "docker", "local"] = "auto"

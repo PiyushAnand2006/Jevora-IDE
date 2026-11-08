@@ -172,3 +172,44 @@ def load_snapshot(path: Path) -> WorkspaceSnapshot | None:
     for rel, (size, mtime_ns, sha1, text, binary) in data["files"].items():
         snap.files[rel] = FileEntry(size=size, mtime_ns=mtime_ns, sha1=sha1, text=text, binary=binary)
     return snap
+
+
+def restore_snapshot(snapshot: WorkspaceSnapshot) -> dict[str, list[str]]:
+    """Restore the workspace to the snapshot state (best effort, pre-run contents).
+
+    Text files recorded in the snapshot are written back; files created after the
+    snapshot are deleted. Binary contents were never captured, so changed/deleted
+    binary files are reported as ``skipped`` (with their current sha1 untouched).
+    Ignores the same directories snapshots ignore (.git, node_modules, …).
+    """
+    root = snapshot.root
+    current = {rel for rel, _ in iter_files(root)}
+    snap_rels = set(snapshot.files)
+    restored: list[str] = []
+    deleted: list[str] = []
+    skipped: list[str] = []
+
+    for rel in sorted(current - snap_rels):
+        try:
+            (root / rel).unlink()
+            deleted.append(rel)
+        except OSError:
+            skipped.append(rel)
+
+    for rel in sorted(snap_rels):
+        entry = snapshot.files[rel]
+        path = root / rel
+        if entry.text is None:
+            # binary or over-size: content was not captured, nothing to restore
+            skipped.append(rel)
+            continue
+        current_text, is_bin = _read_text(path)
+        if not is_bin and current_text == entry.text and path.exists():
+            continue  # already at snapshot state
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(entry.text, encoding="utf-8", newline="")
+            restored.append(rel)
+        except OSError:
+            skipped.append(rel)
+    return {"restored": restored, "deleted": deleted, "skipped": skipped}

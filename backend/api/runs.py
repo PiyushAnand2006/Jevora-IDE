@@ -85,6 +85,40 @@ async def resume_run(run_id: str, user: CurrentUser, ctx: Ctx) -> dict[str, Any]
     return await ctx.runs.resume(user.id, run_id)
 
 
+@router.post("/api/runs/{run_id}/revert")
+async def revert_run(run_id: str, user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
+    """Restore the workspace to the state captured before this run started."""
+    import asyncio as _asyncio
+
+    from backend.agents.workspace_state import load_snapshot, restore_snapshot
+
+    run = await _owned_run(ctx, user.id, run_id)
+    if run.status not in TERMINAL_STATUSES:
+        raise AppError("the run is still executing — cancel it before reverting",
+                       code="run_active", status_code=409)
+    snapshot_path = ctx.settings.data_dir / "snapshots" / f"{run_id}.json.gz"
+    snapshot = await _asyncio.to_thread(load_snapshot, snapshot_path)
+    if snapshot is None:
+        raise NotFound("no pre-run snapshot was kept for this run", code="no_snapshot")
+    report = await _asyncio.to_thread(restore_snapshot, snapshot)
+
+    # Surface the reversal in the file feed (bounded) and on the run itself.
+    for rel in report["restored"][:50]:
+        ctx.events.publish("file.changed", user_id=user.id, data={
+            "path": rel, "change": "reverted", "run_id": run_id, "source": "revert"})
+    async with ctx.sessions() as session:
+        db_run = await session.get(Run, run_id)
+        if db_run is not None:
+            meta = dict(db_run.meta or {})
+            meta["reverted"] = True
+            db_run.meta = meta
+            await session.commit()
+    ctx.events.publish("workspace.reverted", user_id=user.id, run_id=run_id, data={
+        "restored": len(report["restored"]), "deleted": len(report["deleted"]),
+        "skipped": len(report["skipped"])})
+    return {"ok": True, "run_id": run_id, **report}
+
+
 @router.post("/api/runs/{run_id}/escalation")
 async def answer_escalation(run_id: str, body: EscalationAnswer, user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
     return await ctx.runs.answer_escalation(user.id, run_id, choice=body.choice, message=body.message,

@@ -9,6 +9,7 @@ from backend.conversations import owned_conversation, save_message
 from backend.core.logging import get_logger
 from backend.db.models import Conversation, Run
 from backend.decision.schemas import Evidence
+from backend.orchestrator.autocommit import commit_run_changes
 from backend.orchestrator.nodes.common import ctx_for, set_status
 from backend.orchestrator.nodes.researcher import sources_footer
 from backend.orchestrator.nodes.tester import diff_evidence, system_tool
@@ -123,6 +124,17 @@ async def finalize(o: Orchestrator, state: GraphState) -> dict[str, Any]:
         elif status == "failed" and state.get("worker_error"):
             output = f"{output}\n\nRun failed: {state['worker_error']}"
     await _save_conversation(o, state, output)
+    if status == "done" and state.get("mode") == "build" and o.app.settings.auto_commit:
+        # Leave verified work as a commit on the current branch (Codex/ZCode style).
+        try:
+            commit = await commit_run_changes(
+                rc.workspace, task=state["task"], run_id=rc.run_id,
+                files=list(stats.get("files") or [])[:200],
+                deleted=list(stats.get("deleted_files") or [])[:200])
+            if commit:
+                rc.recorder.emit("git.committed", commit)
+        except Exception:  # best-effort; never fail the run over a commit
+            log.warning("auto-commit failed unexpectedly", exc_info=True)
     async with o.app.sessions() as session:
         run = await session.get(Run, rc.run_id)
         if run is not None:

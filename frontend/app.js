@@ -841,6 +841,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="drawer-muted rs-models"></span>
             <button class="run-cancel-btn" type="button">Cancel</button>
           </div>
+          <ul class="task-list" style="display:none"></ul>
           <details class="run-tree" open><summary>Agents</summary><div class="tree-root"></div></details>
           <div class="stream-text md-content"></div>
           <div class="final-output md-content"></div>
@@ -856,6 +857,8 @@ document.addEventListener('DOMContentLoaded', () => {
       this.finalEl = this.el.querySelector('.final-output');
       this.decisionEl = this.el.querySelector('.decision-line');
       this.escalationSlot = this.el.querySelector('.escalation-slot');
+      this.tasksEl = this.el.querySelector('.task-list');
+      this.tasks = null;
       this.cancelBtn = this.el.querySelector('.run-cancel-btn');
       this.cancelBtn.addEventListener('click', () => this.cancel());
       // governance timeline + per-run diff (panels.js)
@@ -892,6 +895,30 @@ document.addEventListener('DOMContentLoaded', () => {
       const pulse = this.statusChip.querySelector('.pulse');
       if (pulse) pulse.style.display = TERMINAL.includes(status) ? 'none' : '';
       this.cancelBtn.style.display = ['done', 'failed'].includes(status) ? 'none' : '';
+      if (this.tasks && TERMINAL.includes(status)) {
+        const state = status === 'done' ? 'done' : 'failed';
+        this.tasksEl.querySelectorAll('li[data-task]').forEach((li) => {
+          if (li.dataset.state === 'pending') li.dataset.state = state;
+        });
+      }
+    }
+
+    setTasks(items) {
+      if (!Array.isArray(items) || !items.length || this.tasks) return;
+      this.tasks = items;
+      this.tasksEl.style.display = '';
+      this.tasksEl.innerHTML = '<li class="task-list-title">Plan</li>' +
+        items.map((t, i) => `<li data-task="${i}" data-state="pending"><span class="task-box"></span><span>${escapeHtml(t)}</span></li>`).join('');
+      scrollMessagesToBottom();
+    }
+
+    showCommit(data) {
+      const chip = document.createElement('span');
+      chip.className = 'run-commit-chip';
+      chip.textContent = `Committed ${String(data.sha || '').slice(0, 7)} · ${data.files || 0} file(s)`;
+      chip.title = data.message || '';
+      this.el.querySelector('.run-meta-row').appendChild(chip);
+      showToast(`Agent committed ${data.files || 0} file(s)`);
     }
 
     node(callId, parentId, data = {}) {
@@ -978,6 +1005,12 @@ document.addEventListener('DOMContentLoaded', () => {
           break;
         case 'escalation.resolved':
           this.escalationSlot.innerHTML = '';
+          break;
+        case 'task_list':
+          this.setTasks(data.items);
+          break;
+        case 'git.committed':
+          this.showCommit(data);
           break;
         case 'file.changed':
           if (currentDrawer === 'files') refreshFilesDrawer();

@@ -2573,3 +2573,30 @@ html, body {
   .jv-modal { width: 96vw !important; max-height: 92vh; }
   .panel-header-bar { padding: 8px 10px; }
 }
+
+/* --- Run task list (plan checklist) + commit chip -------------------------- */
+.task-list {
+  list-style: none; margin: 0 0 10px; padding: 10px 12px;
+  border: 1px solid var(--border-card); border-radius: 10px; background: var(--bg-surface-alt);
+}
+.task-list-title {
+  font-size: 9px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 6px; list-style: none;
+}
+.task-list li[data-task] {
+  display: flex; align-items: flex-start; gap: 8px; padding: 3px 0;
+  font-size: 12.5px; line-height: 1.5; color: var(--text-primary);
+}
+.task-list .task-box {
+  flex-shrink: 0; width: 13px; height: 13px; margin-top: 3px; border-radius: 4px;
+  border: 1.5px solid var(--text-muted); display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; line-height: 1;
+}
+.task-list li[data-state="done"] { color: var(--text-secondary); text-decoration: line-through; text-decoration-color: rgba(100, 116, 139, 0.5); }
+.task-list li[data-state="done"] .task-box { background: #10B981; border-color: #10B981; }
+.task-list li[data-state="done"] .task-box::before { content: '✓'; color: #fff; font-weight: 700; }
+.task-list li[data-state="failed"] .task-box { border-color: #EF4444; background: #FEE2E2; }
+.run-commit-chip {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600;
+  color: #047857; background: #ECFDF5; padding: 3px 8px; border-radius: var(--radius-pill);
+}
