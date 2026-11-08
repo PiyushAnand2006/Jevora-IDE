@@ -190,9 +190,10 @@ async def test_auth_flow_in_browser(tmp_path: Path) -> None:
             page.fill("#emailInput", "missing@example.com")
             page.fill("#passwordInput", "analytical-engine")
             page.click("#submitBtn")
-            page.wait_for_selector("#authMessage.error")
-            assert page.inner_text("#authMessage").lower() == "email not registered"
-            page.click("#switchModeBtn")
+            # Unknown email: the form switches to account creation with guidance.
+            page.wait_for_selector("#authMessage:not([hidden])")
+            assert "no account exists" in page.inner_text("#authMessage").lower()
+            assert page.is_visible("#nameInput")
             page.fill("#nameInput", "Ada Lovelace")
             page.fill("#emailInput", "ada@example.com")
             page.fill("#passwordInput", "analytical-engine")

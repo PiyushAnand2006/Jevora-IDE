@@ -42,4 +42,25 @@ jobs:
         run: npm install --ignore-scripts
 
       - name: Syntax-check shell sources
-        run: node --check electron/main.js && node --check electron/backend.js && node --check electron/preload.js && node --check frontend/app.js && node --check frontend/shell.js
+        run: node --check electron/main.js && node --check electron/backend.js && node --check electron/preload.js && node --check frontend/app.js && node --check frontend/editor.js && node --check frontend/panels.js && node --check frontend/settings.js && node --check frontend/shell.js
+
+  e2e:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium
+
+      - name: Frontend e2e
+        run: python -m pytest tests/e2e -q --timeout=600

@@ -66,3 +66,9 @@ smoke-report.json
 .mimosa/
 pip-build-env-*/
 pip-modern-metadata-*/
+
+# Personal scratch / reverse-engineering artifacts (never committed)
+antigravity_*.txt
+inject_model.py
+model_addition.txt
+.tmpe2e/

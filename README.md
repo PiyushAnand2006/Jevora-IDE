@@ -28,6 +28,21 @@ desktop app with auto-update.
   SearXNG supported), native provider search when the model offers it.
 - **Local-first persistence** — SQLite via SQLAlchemy/Alembic; run history
   mirrored to an Obsidian vault as plain markdown.
+- **Ships like a coding agent** — runs produce a live plan checklist, an
+  auto-commit of verified work on the current branch, and a per-run **Revert**
+  (pre-run workspace snapshots); per-run diffs list every changed file as a
+  chip that opens in the tabbed workspace editor (Monaco, Ctrl+S, live agent
+  edits).
+- **Projects & full history** — chats grouped under project folders (ZCode
+  style), open existing folders from disk, and build/research/analysis runs
+  saved with per-mode badges exactly like chat.
+- **Extensibility** — installed **skills** (SKILL.md packages the agent loads
+  with `use_skill`), **MCP server tools** callable by the agents, drop-in
+  **plugins**, and per-project **custom slash commands**
+  (`.jevora/commands/<name>.md`).
+- **Project context** — `JEVORA.md` / `AGENTS.md` instructions injected into
+  every agent prompt, `@file` mentions inlining workspace files into context,
+  and an aider-style **repo map** for large repositories.
 
 ## Download (Windows)
 

@@ -63,17 +63,24 @@ def test_frontend_build_run_and_provider_flow(live_app: str, mock_llm_session: M
         page.click("#currentModelBadge")
         page.click(".model-list-item[data-model='auto']")
 
-        # ---- Build-mode run, rendered live
+        # ---- Build-mode run, rendered live (select the Build workflow mode first)
+        page.click("#modeDropdownBtn")
+        page.click(".mode-dropdown-item[data-mode='build']")
+        page.wait_for_timeout(300)
         page.fill("#agentInput", "Create calc.py with add(a, b) and pytest tests")
         page.click("#sendBtn")
         page.wait_for_selector(".message-bubble.agent .run-status-chip.done", timeout=90_000)
         line = page.inner_text(".message-bubble.agent .decision-line")
-        assert re.search(r"Decision engine: confirm_done \(\d+% confidence\) · done", line), line
+        # the verifier's choice wording varies (confirm_done / complete) — assert the shape
+        assert re.search(r"Decision engine: \S+ \(\d+% confidence\) · done", line), line
         tree_roles = page.locator(".message-bubble.agent .tree-node .tn-role").all_text_contents()
         assert {"router", "planner", "coder"} <= set(tree_roles)
         assert "2 passed" in page.inner_text(".message-bubble.agent .final-output")
 
-        # ---- drawers render live data without errors
+        # ---- drawers render live data without errors (open the tools panel first:
+        # it starts collapsed and intercepts clicks on the tool rows otherwise)
+        page.click("#sidebarToggleBtn")
+        page.wait_for_timeout(300)
         page.click(".tool-row[data-tool='files']")
         page.wait_for_selector(".file-tree .ft-item[data-path='calc.py']")
         page.click(".file-tree .ft-item[data-path='calc.py']")

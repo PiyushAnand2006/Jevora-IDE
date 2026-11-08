@@ -83,7 +83,13 @@ async def test_escalation_answer_resumes_run(harness: AppHarness, mock_llm: Mock
     answered = await harness.client.post(f"/api/runs/{run_id}/escalation",
                                          json={"choice": "retry", "message": "subtraction is wrong"})
     assert answered.status_code == 200
-    await asyncio.sleep(0.2)
+    # "escalated" is itself a terminal status: wait until the resumed run has
+    # left it before waiting for the final state, or the stale status wins the race.
+    for _ in range(100):
+        run = (await harness.client.get(f"/api/runs/{run_id}")).json()
+        if run["status"] != "escalated":
+            break
+        await asyncio.sleep(0.05)
     run = await wait_terminal(harness.client, run_id, timeout=90)
     assert run["status"] == "done" and run["decisions"][-1]["choice"] == "confirm_done"
     assert coder.attempts == 3
