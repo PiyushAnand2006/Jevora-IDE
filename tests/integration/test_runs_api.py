@@ -160,6 +160,13 @@ async def test_cancel_running_run(harness: AppHarness) -> None:
         if (await harness.client.get(f"/api/runs/{run_id}")).json()["status"] == "planning":
             break
         await asyncio.sleep(0.02)
+    # Wait until both calls exist: cancelling earlier would race the fake runner
+    # between set_status("planning") and start_call(root/child).
+    for _ in range(100):
+        tree = (await harness.client.get(f"/api/runs/{run_id}/tree")).json()
+        if tree["roots"] and tree["roots"][0].get("children"):
+            break
+        await asyncio.sleep(0.02)
     cancelled = (await harness.client.post(f"/api/runs/{run_id}/cancel")).json()
     assert cancelled["status"] == "failed" and cancelled["cancelled"] is True
     tree = (await harness.client.get(f"/api/runs/{run_id}/tree")).json()
