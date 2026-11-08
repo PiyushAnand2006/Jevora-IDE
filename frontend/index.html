@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=10">
+  <link rel="stylesheet" href="styles.css?v=11">
 </head>
 <body>
   <div class="app-container">
@@ -146,6 +146,10 @@
                 <span class="profile-avatar" id="profileAvatar">J</span>
               </button>
 
+            <!-- Editor toggle (chat <-> workspace editor) -->
+            <button class="panel-toggle-btn" id="editorToggleBtn" title="Toggle editor (files & tabs)" aria-label="Toggle editor" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </button>
             <!-- Right side panel toggle button in partition header bar -->
             <button class="panel-toggle-btn active" id="sidebarToggleBtn" title="Toggle right panel" type="button" aria-label="Toggle Context &amp; Tools panel">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -153,6 +157,15 @@
                 <path d="M15 3v18"></path>
               </svg>
             </button>
+            </div>
+          </div>
+
+          <!-- Workspace editor (tabbed, Monaco) — toggled over the chat stage -->
+          <div class="editor-workspace" id="editorWorkspace" hidden>
+            <div class="editor-side" id="editorTreeHost"></div>
+            <div class="editor-main">
+              <div class="editor-tabs" id="editorTabs"></div>
+              <div class="editor-host" id="editorHost"></div>
             </div>
           </div>
 
@@ -500,5 +513,6 @@
   <script src="shell.js?v=1"></script>
   <script src="panels.js?v=3"></script>
   <script src="settings.js?v=2"></script>
+  <script src="editor.js?v=1"></script>
 </body>
 </html>

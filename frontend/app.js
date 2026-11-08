@@ -2422,6 +2422,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (event.type === 'file.changed') {
           if (event.data.path) recentFiles.add(event.data.path);
           if (currentDrawer === 'files') refreshFilesDrawer();
+          window.jevoraEditorFileChanged?.(event.data.path);
         } else if (event.type === 'run.status' && TERMINAL.includes(event.data.status)) {
           refreshStatus();
           refreshConversationLists();
