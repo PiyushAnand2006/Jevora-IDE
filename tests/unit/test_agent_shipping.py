@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.agents.repo_map import build_repo_map
 from backend.agents.workspace_state import (
     WorkspaceSnapshot,
     load_snapshot,
@@ -14,6 +15,7 @@ from backend.agents.workspace_state import (
 )
 from backend.core.paths import WorkspaceGuard
 from backend.orchestrator.autocommit import commit_run_changes
+from backend.orchestrator.commands import load_workspace_command, workspace_command_list
 from backend.orchestrator.nodes.common import build_mention_context
 from backend.orchestrator.nodes.planner import parse_plan_items
 
@@ -168,3 +170,68 @@ def test_build_mention_context_resolves_and_caps(tmp_path) -> None:
     assert "binary file" in context and "@blob.bin" in context
     assert "missing.py" not in context and "escape" not in context
     assert build_mention_context(guard, []) == ""
+
+
+# --------------------------------------------------------------------------- repo map
+def test_build_repo_map_symbols_and_groups(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text(
+        "import os\n\n\ndef main():\n    pass\n\n\nclass App:\n    pass\n", encoding="utf-8")
+    (tmp_path / "app.js").write_text(
+        "export function helper() {}\n\nclass Widget {}\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("# not code\n", encoding="utf-8")
+
+    repo_map = build_repo_map(tmp_path)
+    assert "src/" in repo_map and "main.py" in repo_map
+    assert "def main" in repo_map or "main" in repo_map
+    assert "App" in repo_map
+    assert "helper" in repo_map and "Widget" in repo_map
+    assert "notes.md" in repo_map and "not code" not in repo_map  # listed, no symbols
+    assert len(repo_map) <= 6_000
+
+
+def test_build_repo_map_empty_and_cache(tmp_path) -> None:
+    assert build_repo_map(tmp_path) == ""
+    (tmp_path / "a.py").write_text("def first():\n    pass\n", encoding="utf-8")
+    first = build_repo_map(tmp_path)
+    assert "first" in first
+    # cached: same content until the signature changes
+    assert build_repo_map(tmp_path) == first
+
+
+# --------------------------------------------------------------------------- custom commands
+def test_load_workspace_command(tmp_path) -> None:
+    d = tmp_path / ".jevora" / "commands"
+    d.mkdir(parents=True)
+    (d / "deploy.md").write_text(
+        "mode: build\nDeploy the app. Target: {{args}}\nVerify the health endpoint after.\n",
+        encoding="utf-8")
+    (d / "Not Valid.md").write_text("ignored\n", encoding="utf-8")
+
+    loaded = load_workspace_command(tmp_path, "/deploy production")
+    assert loaded is not None
+    prompt, mode = loaded
+    assert mode == "build"
+    assert "Target: production" in prompt and "User arguments" not in prompt
+    assert load_workspace_command(tmp_path, "/nonexistent") is None
+    assert load_workspace_command(tmp_path, "not a command") is None
+    assert load_workspace_command(tmp_path, "/Not Valid") is None
+
+
+def test_load_workspace_command_default_mode_and_arg_append(tmp_path) -> None:
+    d = tmp_path / ".jevora" / "commands"
+    d.mkdir(parents=True)
+    (d / "review.md").write_text("Review the code carefully.\n", encoding="utf-8")
+    prompt, mode = load_workspace_command(tmp_path, "/review the auth module")
+    assert mode == "build"
+    assert prompt == "Review the code carefully.\n\nUser arguments: the auth module"
+
+
+def test_workspace_command_list(tmp_path) -> None:
+    d = tmp_path / ".jevora" / "commands"
+    d.mkdir(parents=True)
+    (d / "deploy.md").write_text("# Deploy the service\nmode: build\nbody", encoding="utf-8")
+    (d / "skip me.md").write_text("x", encoding="utf-8")
+    listed = workspace_command_list(tmp_path)
+    assert len(listed) == 1
+    assert listed[0]["name"] == "/deploy" and "Deploy the service" in listed[0]["description"]

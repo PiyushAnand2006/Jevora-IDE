@@ -13,14 +13,15 @@ from backend.core.errors import AppError, NotFound
 from backend.core.ids import iso, utcnow
 from backend.db.models import Decision, Run
 from backend.decision.schemas import SCHEMA_CHOICES
-from backend.orchestrator.commands import command_list
+from backend.orchestrator.commands import command_list, workspace_command_list
 
 router = APIRouter(tags=["extras"])
 
 
 @router.get("/api/commands")
-async def commands(user: CurrentUser) -> list[dict[str, Any]]:
-    return command_list()
+async def commands(user: CurrentUser, ctx: Ctx) -> list[dict[str, Any]]:
+    """Built-in slash commands plus the workspace's .jevora/commands/*.md."""
+    return command_list() + workspace_command_list(ctx.settings.workspace_root)
 
 
 # --------------------------------------------------------------------------- plugins

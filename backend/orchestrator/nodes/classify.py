@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from backend.agents.tools.terminal import detect_test_command
 from backend.core.errors import NotFound
+from backend.orchestrator.commands import load_workspace_command
 from backend.orchestrator.nodes.common import ctx_for, load_attachments, set_status
 from backend.providers.base import ChatMessage, NoProviderConfigured, ProviderError
 from backend.providers.router import CallMeta
@@ -51,6 +53,18 @@ async def classify(o: Orchestrator, state: GraphState) -> dict[str, Any]:
     await set_status(o, state, "planning")
     mode, task, command = state["mode"], state["task"], state.get("command")
     updates: dict[str, Any] = {}
+    # Project-defined slash commands: .jevora/commands/<name>.md in the workspace
+    # turns `/name args` into a full prompt (mode declared on the file's first line).
+    if command is None and task.startswith("/"):
+        custom = await asyncio.to_thread(load_workspace_command, rc.workspace, task)
+        if custom is not None:
+            prompt, file_mode = custom
+            head = task.lstrip().split(" ", 1)[0]
+            command = f"/{head[1:].lower()}"
+            command_arg = task.lstrip().split(" ", 1)[1].strip() if " " in task.lstrip() else ""
+            mode, task = file_mode, prompt
+            updates.update({"mode": mode, "task": task, "command": command, "command_arg": command_arg})
+            rc.recorder.emit("command.custom", {"command": command, "mode": mode})
     # Fail fast with a clear message when no model can be reached at all.
     try:
         await o.app.router.resolve(rc.user_id, rc.model_override or "auto", "code_generation")

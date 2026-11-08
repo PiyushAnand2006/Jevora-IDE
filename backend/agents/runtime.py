@@ -23,6 +23,7 @@ from backend.agents.config import AgentConfig
 from backend.agents.context import estimate_tokens, project_history
 from backend.agents.memory import MemoryService
 from backend.agents.pool import CallNode, RunScope, task_key
+from backend.agents.repo_map import build_repo_map
 from backend.agents.templates import BUILTIN_TEMPLATES, template
 from backend.agents.tools.base import Tool, ToolContext, ToolRegistry, ToolResult, schema
 from backend.agents.workspace_state import WorkspaceSnapshot, read_project_instructions
@@ -174,6 +175,15 @@ class AgentRuntime:
         if instructions:
             text, filename = instructions
             parts.append(f"Project instructions (from {filename} — follow these for this workspace):\n{text}")
+        if rc.mode in ("build", "analysis"):
+            try:
+                repo_map = await asyncio.to_thread(build_repo_map, rc.workspace)
+            except Exception:  # the map is context sugar, never a run-killer
+                log.exception("could not build the repo map")
+                repo_map = ""
+            if repo_map:
+                parts.append("Repository map (structure and key symbols — use list_dir/read_file for details):\n"
+                             + repo_map)
         if config.memory_scope == "agent":
             notes = await self.memory.agent_notes(rc.user_id, config.name)
             if notes:
