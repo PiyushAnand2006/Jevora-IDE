@@ -25,7 +25,7 @@ from backend.agents.memory import MemoryService
 from backend.agents.pool import CallNode, RunScope, task_key
 from backend.agents.templates import BUILTIN_TEMPLATES, template
 from backend.agents.tools.base import Tool, ToolContext, ToolRegistry, ToolResult, schema
-from backend.agents.workspace_state import WorkspaceSnapshot
+from backend.agents.workspace_state import WorkspaceSnapshot, read_project_instructions
 from backend.core.errors import BudgetExceeded
 from backend.core.logging import correlation, get_logger
 from backend.core.paths import WorkspaceGuard
@@ -166,6 +166,14 @@ class AgentRuntime:
         parts.append(
             f"Environment: workspace root is '.', commands run in a {sandbox_kind} sandbox; today is {today}."
         )
+        try:
+            instructions = await asyncio.to_thread(read_project_instructions, rc.workspace)
+        except Exception:  # never fail a run over an unreadable instructions file
+            log.exception("could not read the project instructions file")
+            instructions = None
+        if instructions:
+            text, filename = instructions
+            parts.append(f"Project instructions (from {filename} — follow these for this workspace):\n{text}")
         if config.memory_scope == "agent":
             notes = await self.memory.agent_notes(rc.user_id, config.name)
             if notes:

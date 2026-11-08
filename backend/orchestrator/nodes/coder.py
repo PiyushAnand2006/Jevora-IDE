@@ -9,6 +9,7 @@ from backend.orchestrator.nodes.common import (
     ctx_for,
     image_parts,
     load_attachments,
+    mention_context,
     set_status,
     worker_config,
 )
@@ -45,6 +46,9 @@ async def build_worker(o: Orchestrator, state: GraphState, template_name: str) -
         context.append("Code review notes from the critic:\n" + state["review"])
     if attachments:
         context.append(attachment_context(attachments))
+    mentions = await mention_context(o, state)
+    if mentions:
+        context.append("Files the user referenced with @:\n" + mentions)
     category = config.category or ("creative_ui" if template_name == "ui-designer" else state.get("category"))
     result = await o.app.runtime.run_agent(
         rc, config, _task_text(state), role=config.template or config.name, context="\n\n".join(context),

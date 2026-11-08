@@ -604,6 +604,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (attachMenu && !attachMenu.contains(e.target) && !attachToggleBtn?.contains(e.target)) attachMenu.classList.remove('open');
     if (commandPopover && !commandPopover.hidden && !commandPopover.contains(e.target)) commandPopover.hidden = true;
+    if (mentionPopover && !mentionPopover.hidden && !mentionPopover.contains(e.target) && e.target !== agentInput) hideMentionPopover();
   });
 
   function pickFiles(accept, multiple) {
@@ -676,6 +677,97 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
     commandPopover.hidden = false;
+  }
+
+  // ---- @-file mentions (Codex-style): type @ to reference workspace files ---
+  const mentionPopover = $('mentionPopover');
+  const mentionState = { files: null, items: [], index: 0, start: -1, query: '' };
+  let mentionFilesTimer = null;
+
+  function flattenTree(node, out) {
+    if (node.type === 'file') { out.push(node.path); return; }
+    for (const child of (node.children || [])) flattenTree(child, out);
+  }
+
+  async function loadMentionFiles() {
+    try {
+      const tree = await api.get('/api/workspace/tree?depth=8&limit=2000');
+      const paths = [];
+      flattenTree(tree, paths);
+      mentionState.files = paths.slice(0, 1200);
+    } catch (_) { mentionState.files = []; }
+    return mentionState.files;
+  }
+
+  function mentionQueryAt(text, caret) {
+    const before = text.slice(0, caret);
+    const match = before.match(/(?:^|\s)@([^\s@]*)$/);
+    return match ? { start: caret - match[1].length - 1, query: match[1] } : null;
+  }
+
+  function renderMentionItems() {
+    const q = mentionState.query.toLowerCase();
+    let items = (mentionState.files || []).filter((p) => p.toLowerCase().includes(q));
+    items.sort((a, b) => {
+      const ab = a.split('/').pop().toLowerCase();
+      const bb = b.split('/').pop().toLowerCase();
+      return (ab.startsWith(q) ? 0 : 1) - (bb.startsWith(q) ? 0 : 1) || ab.localeCompare(bb);
+    });
+    items = items.slice(0, 10);
+    mentionState.items = items;
+    mentionState.index = Math.max(0, Math.min(mentionState.index, items.length - 1));
+    mentionPopover.innerHTML = items.length
+      ? items.map((p, i) => `<button type="button" data-path="${escapeHtml(p)}" class="${i === mentionState.index ? 'active' : ''}"><span class="mp-name">${escapeHtml(p.split('/').pop())}</span><span class="mp-path">${escapeHtml(p)}</span></button>`).join('')
+      : '<div class="mp-empty">No matching files</div>';
+    mentionPopover.hidden = false;
+    mentionPopover.querySelectorAll('button[data-path]').forEach((btn, i) => {
+      btn.addEventListener('mousedown', (e) => { e.preventDefault(); applyMention(i); });
+    });
+  }
+
+  function applyMention(index) {
+    const path = mentionState.items[index];
+    if (!path) return;
+    const start = mentionState.start;
+    const end = start + 1 + mentionState.query.length;
+    const before = agentInput.value.slice(0, start);
+    const after = agentInput.value.slice(end);
+    agentInput.value = `${before}@${path} ${after.replace(/^\s+/, '')}`;
+    hideMentionPopover();
+    const caret = before.length + path.length + 2;
+    agentInput.setSelectionRange(caret, caret);
+    agentInput.focus();
+  }
+
+  function hideMentionPopover() { mentionPopover.hidden = true; mentionState.index = 0; }
+
+  function updateMentionPopover() {
+    if (!mentionPopover) return;
+    const hit = mentionQueryAt(agentInput.value, agentInput.selectionStart ?? 0);
+    if (!hit) { hideMentionPopover(); return; }
+    mentionState.start = hit.start;
+    mentionState.query = hit.query;
+    if (mentionState.files === null) {
+      mentionPopover.hidden = false;
+      mentionPopover.innerHTML = '<div class="mp-empty">Loading files…</div>';
+      clearTimeout(mentionFilesTimer);
+      mentionFilesTimer = setTimeout(async () => {
+        await loadMentionFiles();
+        if (!mentionPopover.hidden) renderMentionItems();
+      }, 150);
+    } else {
+      renderMentionItems();
+    }
+  }
+
+  /** @-tokens in the message text; the backend inlines their contents as context. */
+  function extractMentions(text) {
+    const out = new Set();
+    for (const match of text.matchAll(/(?:^|\s)@([^\s@]+)/g)) {
+      const path = match[1].replace(/[.,;:)\]]+$/, '');
+      if (path) out.add(path);
+    }
+    return [...out].slice(0, 10);
   }
 
   function renderAttachments() {
@@ -806,6 +898,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   sendBtn.addEventListener('click', handleSendMessage);
   agentInput.addEventListener('keydown', (e) => {
+    if (!mentionPopover.hidden) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        mentionState.index = Math.min(mentionState.index + 1, mentionState.items.length - 1);
+        renderMentionItems();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        mentionState.index = Math.max(mentionState.index - 1, 0);
+        renderMentionItems();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        applyMention(mentionState.index);
+        return;
+      }
+      if (e.key === 'Escape') { hideMentionPopover(); return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
     if (e.key === 'Escape' && commandPopover) commandPopover.hidden = true;
   });
@@ -813,7 +925,9 @@ document.addEventListener('DOMContentLoaded', () => {
     agentInput.style.height = 'auto';
     agentInput.style.height = `${Math.min(agentInput.scrollHeight, 150)}px`;
     if (agentInput.value === '/') openCommandPopover();
+    updateMentionPopover();
   });
+  agentInput.addEventListener('click', updateMentionPopover);
 
   document.querySelectorAll('.quick-chip').forEach((chip) => {
     chip.addEventListener('click', () => {
@@ -1079,6 +1193,35 @@ document.addEventListener('DOMContentLoaded', () => {
           `<img src="${artifactUrl(s.path)}" alt="Screen test step ${s.meta?.step ?? i + 1}" loading="lazy"></a>`).join('');
         bubbleContent.appendChild(grid);
       }
+      // Files this run touched — click to open in the editor.
+      const diffArt = (run.artifacts || []).find((a) => a.kind === 'diff');
+      const changedFiles = diffArt?.meta?.files || [];
+      const deletedFiles = diffArt?.meta?.deleted_files || [];
+      if (changedFiles.length || deletedFiles.length) {
+        const row = document.createElement('div');
+        row.className = 'run-files-row';
+        row.innerHTML = '<div class="run-files-label">Files changed — click to open in the editor</div>';
+        changedFiles.slice(0, 20).forEach((p) => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'run-file-chip';
+          chip.textContent = p.split('/').pop();
+          chip.title = p;
+          chip.addEventListener('click', () => {
+            if (window.jevoraOpenEditor) window.jevoraOpenEditor(p);
+            else showToast('The editor is unavailable in this view');
+          });
+          row.appendChild(chip);
+        });
+        deletedFiles.slice(0, 10).forEach((p) => {
+          const chip = document.createElement('span');
+          chip.className = 'run-file-chip deleted';
+          chip.textContent = p.split('/').pop();
+          chip.title = `${p} (deleted)`;
+          row.appendChild(chip);
+        });
+        bubbleContent.appendChild(row);
+      }
       addAssistantActions(bubbleContent, run.final_output || '', () => {
         runAgentTask(run.task || '', run.attachments || []);
       });
@@ -1201,7 +1344,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const body = { text: prompt, mode: currentMode === 'general' ? 'research' : currentMode, model: selectedModel.key,
         web_search: currentMode === 'research' || webSearchEnabled, attachments: attachmentIds,
-        project_id: getActiveProject()?.id || null };
+        project_id: getActiveProject()?.id || null, mentions: extractMentions(prompt) };
       if (selectedAgent) body.agent_id = selectedAgent.id;
       if (conversationId) body.conversation_id = conversationId;
       const created = await api.post('/api/runs', body);
@@ -1816,8 +1959,36 @@ document.addEventListener('DOMContentLoaded', () => {
     clearTimeout(conversationRefreshTimer);
     conversationRefreshTimer = setTimeout(() => {
       loadRecentConversations();
+      refreshRunSwitcher();
       if (currentDrawer === 'history') loadHistory(false);
     }, 200);
+  }
+
+  // ---- Background-run switcher: conversations with runs still in flight ----
+  const runSwitcher = document.createElement('div');
+  runSwitcher.className = 'run-switcher';
+  runSwitcher.hidden = true;
+  document.body.appendChild(runSwitcher);
+
+  function renderRunSwitcherPills(items) {
+    const active = items.filter((c) => (c.active_runs || 0) > 0);
+    runSwitcher.hidden = !active.length;
+    runSwitcher.innerHTML = active.map((c) => `
+      <button type="button" class="run-switch-pill${c.id === conversationId ? ' current' : ''}"
+              data-conversation-id="${escapeHtml(c.id)}" title="${escapeHtml(c.title || 'Conversation')}">
+        <span class="rsp-dot"></span><span>${escapeHtml((c.title || 'Conversation').slice(0, 34))}</span>
+        <span class="rsp-count">${Array.isArray(c.active_run_ids) ? c.active_run_ids.length : c.active_runs}</span>
+      </button>`).join('');
+    runSwitcher.querySelectorAll('button[data-conversation-id]').forEach((btn) => {
+      btn.addEventListener('click', () => openConversation(btn.dataset.conversationId));
+    });
+  }
+
+  async function refreshRunSwitcher() {
+    try {
+      const page = await api.get('/api/conversations?limit=20');
+      renderRunSwitcherPills(page.items);
+    } catch (_) { /* backend offline */ }
   }
 
   async function renderHistoryDrawer(focusSearch = false) {
@@ -2562,6 +2733,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (revision !== sessionRevision && !conversationLoading) setConversationId(conversationId);
     await restoreConversation(revision);
     loadRecentConversations();
+    refreshRunSwitcher();
     try {
       features = await api.get('/api/features');
       const webItem = $('webSearchMenuItem');

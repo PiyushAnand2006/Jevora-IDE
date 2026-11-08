@@ -6,7 +6,13 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from backend.agents.templates import template
-from backend.orchestrator.nodes.common import attachment_context, ctx_for, load_attachments, set_status
+from backend.orchestrator.nodes.common import (
+    attachment_context,
+    ctx_for,
+    load_attachments,
+    mention_context,
+    set_status,
+)
 
 if TYPE_CHECKING:
     from backend.orchestrator.graph import Orchestrator
@@ -36,6 +42,9 @@ async def planner(o: Orchestrator, state: GraphState) -> dict[str, Any]:
     await set_status(o, state, "planning")
     attachments = await load_attachments(o, state)
     context = attachment_context(attachments)
+    mentions = await mention_context(o, state)
+    if mentions:
+        context = (context + "\n\n" if context else "") + "Files the user referenced with @:\n" + mentions
     spec = state.get("spec") or {}
     if spec:
         context = (f"Task triage: {spec}\n\n" + context).strip()

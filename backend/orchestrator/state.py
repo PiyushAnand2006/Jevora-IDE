@@ -18,6 +18,7 @@ class GraphState(TypedDict, total=False):
     model_override: str | None
     conversation_id: str | None
     attachments: list[str]
+    mentions: list[str]
     web_search: bool
     flags: dict[str, bool]
     # routing

@@ -1,4 +1,4 @@
-"""Plan parsing, snapshot restore, and the auto-commit helper."""
+"""Plan parsing, snapshot restore, auto-commit, instructions file, @-mentions."""
 
 import subprocess
 from pathlib import Path
@@ -8,10 +8,13 @@ import pytest
 from backend.agents.workspace_state import (
     WorkspaceSnapshot,
     load_snapshot,
+    read_project_instructions,
     restore_snapshot,
     save_snapshot,
 )
+from backend.core.paths import WorkspaceGuard
 from backend.orchestrator.autocommit import commit_run_changes
+from backend.orchestrator.nodes.common import build_mention_context
 from backend.orchestrator.nodes.planner import parse_plan_items
 
 
@@ -132,3 +135,36 @@ async def test_commit_run_changes_skips_clean_and_non_repo(tmp_path) -> None:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-m", "add x")
     assert await commit_run_changes(repo, task="t", run_id="run_1", files=["x.txt"], deleted=[]) is None
+
+
+# --------------------------------------------------------------------------- instructions file
+def test_read_project_instructions_prefers_jevora_md(tmp_path) -> None:
+    (tmp_path / "JEVORA.md").write_text("jevora rules\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("agent rules\n", encoding="utf-8")
+    text, name = read_project_instructions(tmp_path)
+    assert name == "JEVORA.md" and "jevora rules" in text
+
+
+def test_read_project_instructions_fallback_and_missing(tmp_path) -> None:
+    (tmp_path / "AGENTS.md").write_text("agent rules\n", encoding="utf-8")
+    text, name = read_project_instructions(tmp_path)
+    assert name == "AGENTS.md" and "agent rules" in text
+    assert read_project_instructions(tmp_path / "nope") is None
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "JEVORA.md").write_text("   \n", encoding="utf-8")
+    assert read_project_instructions(empty) is None
+
+
+# --------------------------------------------------------------------------- @-mentions
+def test_build_mention_context_resolves_and_caps(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("print('hello')\n", encoding="utf-8")
+    (tmp_path / "blob.bin").write_bytes(b"\x00\x01binary")
+    guard = WorkspaceGuard(tmp_path)
+
+    context = build_mention_context(guard, ["src/main.py", "blob.bin", "missing.py", "../escape.txt"])
+    assert "@src/main.py" in context and "print('hello')" in context
+    assert "binary file" in context and "@blob.bin" in context
+    assert "missing.py" not in context and "escape" not in context
+    assert build_mention_context(guard, []) == ""

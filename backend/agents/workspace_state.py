@@ -16,6 +16,25 @@ MAX_FILES = 5000
 MAX_TEXT_BYTES = 256 * 1024
 MAX_TOTAL_TEXT = 64 * 1024 * 1024
 
+# Per-project agent instructions (Codex reads AGENTS.md, Claude reads CLAUDE.md;
+# Jevora reads JEVORA.md first and falls back to AGENTS.md).
+INSTRUCTION_FILES = ("JEVORA.md", "AGENTS.md")
+MAX_INSTRUCTION_CHARS = 8_000
+
+
+def read_project_instructions(workspace: Path) -> tuple[str, str] | None:
+    """Return (text, filename) for the workspace's instruction file, or None."""
+    for name in INSTRUCTION_FILES:
+        path = workspace / name
+        try:
+            if path.is_file():
+                text = path.read_text(encoding="utf-8", errors="replace")[:MAX_INSTRUCTION_CHARS]
+                if text.strip():
+                    return text, name
+        except OSError:
+            continue
+    return None
+
 
 def iter_files(root: Path, max_files: int = MAX_FILES) -> Iterator[tuple[str, os.stat_result]]:
     count = 0

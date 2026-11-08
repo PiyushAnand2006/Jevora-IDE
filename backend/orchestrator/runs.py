@@ -68,14 +68,14 @@ class RunService:
                                  attachments=body.get("attachments") or [], agent_id=body.get("agent_id"),
                                  conversation_id=body.get("conversation_id"),
                                  workspace_id=body.get("workspace_id"), command=command,
-                                 project_id=body.get("project_id"),
+                                 project_id=body.get("project_id"), mentions=body.get("mentions"),
                                  meta={**(body.get("meta") or {}), "web_search": bool(body.get("web_search", False))})
 
     async def create(self, user_id: str, *, text: str, mode: str, model: str | None = None,
                      attachments: list[str] | None = None, agent_id: str | None = None,
                      conversation_id: str | None = None, workspace_id: str | None = None,
                      command: str | None = None, meta: dict[str, Any] | None = None,
-                     project_id: str | None = None) -> Run:
+                     project_id: str | None = None, mentions: list[str] | None = None) -> Run:
         mode = MODE_ALIASES.get((mode or "build").lower(), (mode or "build").lower())
         if mode not in MODES:
             raise AppError(f"mode must be one of {', '.join(MODES)}", code="invalid_mode", status_code=422)
@@ -91,6 +91,8 @@ class RunService:
                   model_override=None if (model or "auto").lower() == "auto" else model,
                   attachments=list(attachments or []), agent_id=agent_id, conversation_id=conversation_id,
                   workspace_id=workspace_id, status="queued", meta=meta or {})
+        if mentions:
+            run.meta = {**(run.meta or {}), "mentions": [str(m)[:200] for m in mentions][:10]}
         async with self.sessions() as session:
             # Every run participates in a conversation so build/research/analysis
             # history is saved exactly like chat (one project per conversation).

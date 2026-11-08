@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -10,6 +11,8 @@ from sqlalchemy import select
 
 from backend.agents.config import AgentConfig
 from backend.agents.templates import template
+from backend.core.errors import AppError
+from backend.core.paths import is_binary
 from backend.db.models import Attachment
 from backend.providers.base import ContentPart
 
@@ -19,6 +22,50 @@ if TYPE_CHECKING:
     from backend.orchestrator.state import GraphState
 
 MAX_ATTACHMENT_CONTEXT = 60_000
+MAX_MENTIONS = 8
+MAX_MENTION_CHARS = 24_000
+
+
+def build_mention_context(guard: Any, mentions: list[str]) -> str:
+    """Inline the contents of @-mentioned workspace files (guard-resolved, capped)."""
+    parts: list[str] = []
+    budget = MAX_MENTION_CHARS
+    for raw in (mentions or [])[:MAX_MENTIONS]:
+        try:
+            path = guard.resolve(str(raw))
+        except AppError:
+            continue
+        if not path.is_file():
+            continue
+        rel = guard.relative(path)
+        try:
+            data = path.read_bytes()[:MAX_MENTION_CHARS]
+        except OSError:
+            continue
+        if is_binary(data[:8192]):
+            parts.append(f"--- @{rel} ---\n[binary file — use read_file if you need details]")
+            continue
+        text = data.decode("utf-8", "replace")
+        if not text.strip():
+            continue
+        text = text[:budget]
+        budget -= len(text)
+        parts.append(f"--- @{rel} ---\n{text}")
+        if budget <= 0:
+            break
+    return "\n\n".join(parts)
+
+
+async def mention_context(o: Orchestrator, state: GraphState) -> str:
+    mentions = [str(m) for m in (state.get("mentions") or [])][:MAX_MENTIONS]
+    if not mentions:
+        return ""
+    rc = ctx_for(o, state)
+
+    def _build() -> str:
+        return build_mention_context(rc.guard, mentions)
+
+    return await asyncio.to_thread(_build)
 
 
 async def set_status(o: Orchestrator, state: GraphState, status: str, **fields: Any) -> None:
