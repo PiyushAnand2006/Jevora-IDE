@@ -63,4 +63,6 @@ jobs:
         run: python -m playwright install chromium
 
       - name: Frontend e2e
-        run: python -m pytest tests/e2e -q --timeout=600
+        # -m "not docker": the Docker criterion needs a Linux-container daemon;
+        # it skips where Docker is absent and runs in the Docker test job instead
+        run: python -m pytest tests/e2e -q --timeout=600 -m "not docker"
