@@ -48,7 +48,9 @@ jobs:
         continue-on-error: true
 
       - name: Build backend + installers
-        run: npm run dist
+        # --publish never: electron-builder would otherwise try to publish on a
+        # tag build without GH_TOKEN; the dedicated step below does that.
+        run: npm run dist -- --publish never
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}\.pw-browsers
 
