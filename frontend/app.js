@@ -1500,6 +1500,7 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (tool === 'mcp') renderMcpDrawer();
       else if (tool === 'plugins') renderPluginsDrawer();
       else if (tool === 'screen') renderScreenDrawer();
+      else if (tool === 'skills') renderSkillsDrawer();
       else if (tool === 'vault') renderVaultDrawer();
     });
   });
@@ -2247,6 +2248,55 @@ document.addEventListener('DOMContentLoaded', () => {
           } catch (error) { showToast(`Screen control: ${error.message}`); }
         });
       });
+    });
+  }
+
+  // ---- Skills (SKILL.md packages the agent loads with use_skill) ------------
+  async function renderSkillsDrawer() {
+    if (currentDrawer !== 'skills') openDrawer('Skills', 'skills');
+    drawerBody.innerHTML = '<div class="drawer-muted">Loading skills…</div>';
+    let data;
+    try { data = await api.get('/api/skills'); }
+    catch (error) { drawerBody.innerHTML = `<div class="drawer-card">Could not load skills: ${escapeHtml(error.message)}</div>`; return; }
+    const skills = data.skills || [];
+
+    const card = (s) => `
+      <div class="drawer-card">
+        <div class="drawer-row-between"><strong>${escapeHtml(s.name)}</strong>
+          <span class="skill-source ${s.source === 'project' ? 'project' : ''}">${escapeHtml(s.source)}</span></div>
+        <div class="drawer-muted">${escapeHtml(s.description || 'No description')}</div>
+        <div class="drawer-muted" style="word-break:break-all;font-size:10.5px">${escapeHtml(s.path)}</div>
+      </div>`;
+    drawerBody.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div class="drawer-card">
+          <div class="drawer-section-label">HOW SKILLS WORK</div>
+          <div class="drawer-muted">When a task matches a skill, the agent calls <strong>use_skill</strong> and follows
+          the skill's instructions — including helper scripts next to SKILL.md. Grant the
+          <strong>skills.use</strong> permission in an agent's settings.</div>
+        </div>
+        <div>
+          <div class="drawer-section-label">INSTALLED SKILLS</div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px;">
+            ${skills.map(card).join('') || '<div class="drawer-muted">No skills installed yet.</div>'}
+          </div>
+        </div>
+        <div class="drawer-card">
+          <div class="drawer-section-label">INSTALL A SKILL</div>
+          <div class="drawer-muted">Create a folder with a SKILL.md file:</div>
+          <div class="drawer-muted" style="font-family:var(--font-mono);font-size:11px;margin-top:6px;word-break:break-all">
+            ${escapeHtml('.jevora/skills/<name>/SKILL.md')} — project<br>
+            ${escapeHtml(data.global_dir + '\\<name>\\SKILL.md')} — global</div>
+          <div class="drawer-muted" style="margin-top:6px">SKILL.md starts with frontmatter:</div>
+          <pre style="margin:6px 0 0;font-size:11px;color:var(--text-secondary);white-space:pre-wrap;">---\nname: my-skill\ndescription: What it does and when to use it\n---\nInstructions for the agent…</pre>
+          <button class="chip-btn" type="button" id="skillsOpenBtn" style="margin-top:8px">Open global skills folder</button>
+        </div>
+      </div>`;
+    $('skillsOpenBtn').addEventListener('click', async () => {
+      if (window.jevora?.openPath) {
+        const result = await window.jevora.openPath(data.global_dir);
+        if (result && result.ok === false && result.message) showToast(result.message);
+      } else showToast(data.global_dir);
     });
   }
 

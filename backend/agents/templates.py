@@ -19,7 +19,7 @@ PLANNER = AgentConfig(
         "concrete implementation plan: numbered steps, the files to create or change, acceptance criteria, "
         "and the exact shell command that verifies the work (for Python projects usually "
         "`python -m pytest -q`). Do not write code yourself. " + _COMMON),
-    tool_permissions=["fs.read", "fs.search", "git.read"],
+    tool_permissions=["fs.read", "fs.search", "git.read", "skills.use"],
     model_binding=ModelBindingSpec(category="heavy_reasoning"), memory_scope="workspace",
 )
 
@@ -32,7 +32,7 @@ CODER = AgentConfig(
         "fix failures until they pass. You may delegate a well-scoped subtask with spawn_subagent. When done, "
         "reply with a short summary of the changes. " + _COMMON),
     tool_permissions=["fs.read", "fs.write", "fs.search", "terminal.run", "tests.run", "git.read",
-                      "subagent.spawn", "mcp.call", "memory.write"],
+                      "subagent.spawn", "mcp.call", "memory.write", "skills.use"],
     model_binding=ModelBindingSpec(category="code_generation"), memory_scope="workspace",
 )
 
@@ -65,7 +65,7 @@ UI_DESIGNER = AgentConfig(
         "You are the UI design agent. Produce clean, accessible, responsive UI code (HTML/CSS/JS or the "
         "project's framework). Follow the existing design tokens when present. Write the files with the file "
         "tools and describe the visual result briefly. " + _COMMON),
-    tool_permissions=["fs.read", "fs.write", "fs.search", "terminal.run", "subagent.spawn"],
+    tool_permissions=["fs.read", "fs.write", "fs.search", "terminal.run", "subagent.spawn", "skills.use"],
     model_binding=ModelBindingSpec(category="creative_ui"), memory_scope="workspace",
 )
 
@@ -77,7 +77,7 @@ RESEARCHER = AgentConfig(
         "available, web search results). Produce a structured report with headings, and cite every factual "
         "claim with [n] markers that refer to the numbered source list. If you could not browse the web, say "
         "so explicitly. " + _COMMON),
-    tool_permissions=["fs.read", "fs.search", "web.search", "mcp.call"],
+    tool_permissions=["fs.read", "fs.search", "web.search", "mcp.call", "skills.use"],
     model_binding=ModelBindingSpec(category="research_retrieval"), memory_scope="workspace",
 )
 
@@ -89,7 +89,7 @@ ANALYST = AgentConfig(
         "codebase or data: architecture, dependency graph, complexity hot spots, risks and bottlenecks, with "
         "concrete file references. You may run Python in the sandbox for data analysis. Produce a structured "
         "report. " + _COMMON),
-    tool_permissions=["fs.read", "fs.search", "terminal.run", "git.read"],
+    tool_permissions=["fs.read", "fs.search", "terminal.run", "git.read", "skills.use"],
     model_binding=ModelBindingSpec(category="heavy_reasoning"), memory_scope="workspace",
 )
 
@@ -112,7 +112,7 @@ CHAT = AgentConfig(
         "You can read and search the workspace to ground answers in the user's code; prefer citing file paths. "
         "When numbered sources are provided, cite factual claims with their [n] markers. "
         "Only modify files when the user explicitly asks you to. " + _COMMON),
-    tool_permissions=["fs.read", "fs.search", "git.read", "web.search", "mcp.call"],
+    tool_permissions=["fs.read", "fs.search", "git.read", "web.search", "mcp.call", "skills.use"],
     model_binding=ModelBindingSpec(), memory_scope="agent",
 )
 

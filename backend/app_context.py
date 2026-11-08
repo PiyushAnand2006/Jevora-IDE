@@ -114,7 +114,8 @@ class AppContext:
 
         self.events.bind_loop(asyncio.get_running_loop())
         await self.vault.load_config(self.local_user_id)
-        self.plugins.load_third_party(self.settings.plugins_dir)
+        # drop-in plugins live in <data>/plugins unless PLUGINS_DIR says otherwise
+        self.plugins.load_third_party(self.settings.plugins_dir or (self.settings.data_dir / "plugins"))
         await self.orchestrator.start()
         await self.mcp.start_enabled()
         await self.executor.start()

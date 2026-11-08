@@ -8,11 +8,11 @@ from pydantic import BaseModel, Field, field_validator
 
 ToolPermission = Literal[
     "fs.read", "fs.write", "fs.search", "terminal.run", "tests.run", "git.read", "git.write",
-    "subagent.spawn", "mcp.call", "web.search", "screen.control", "memory.write",
+    "subagent.spawn", "mcp.call", "web.search", "screen.control", "memory.write", "skills.use",
 ]
 ALL_PERMISSIONS: tuple[str, ...] = (
     "fs.read", "fs.write", "fs.search", "terminal.run", "tests.run", "git.read", "git.write",
-    "subagent.spawn", "mcp.call", "web.search", "screen.control", "memory.write",
+    "subagent.spawn", "mcp.call", "web.search", "screen.control", "memory.write", "skills.use",
 )
 MemoryScope = Literal["run", "agent", "workspace", "none"]
 Category = Literal["heavy_reasoning", "fast_classification", "code_generation", "creative_ui",

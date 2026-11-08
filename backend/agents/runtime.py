@@ -24,6 +24,7 @@ from backend.agents.context import estimate_tokens, project_history
 from backend.agents.memory import MemoryService
 from backend.agents.pool import CallNode, RunScope, task_key
 from backend.agents.repo_map import build_repo_map
+from backend.agents.skills import discover_skills
 from backend.agents.templates import BUILTIN_TEMPLATES, template
 from backend.agents.tools.base import Tool, ToolContext, ToolRegistry, ToolResult, schema
 from backend.agents.workspace_state import WorkspaceSnapshot, read_project_instructions
@@ -184,6 +185,15 @@ class AgentRuntime:
             if repo_map:
                 parts.append("Repository map (structure and key symbols — use list_dir/read_file for details):\n"
                              + repo_map)
+        try:
+            skills = await asyncio.to_thread(discover_skills, rc.workspace,
+                                             self.app.settings.data_dir / "skills")
+        except Exception:
+            log.exception("could not discover skills")
+            skills = []
+        if skills and config.has("skills.use"):
+            parts.append("Installed skills — call use_skill to load one before doing the task it covers:\n"
+                         + "\n".join(f"- {s.name}: {s.description} ({s.source})" for s in skills[:12]))
         if config.memory_scope == "agent":
             notes = await self.memory.agent_notes(rc.user_id, config.name)
             if notes:
