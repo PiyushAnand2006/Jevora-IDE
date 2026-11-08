@@ -59,4 +59,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = $env:GITHUB_REF_NAME
-          gh release create $tag "release/Jevora-IDE-Setup-$($tag.TrimStart('v')).exe" "release/Jevora-IDE-Portable-$($tag.TrimStart('v')).exe" "release/latest.yml" --title "Jevora IDE $tag" --generate-notes --clobber
+          $assets = @(
+            "release/Jevora-IDE-Setup-$($tag.TrimStart('v')).exe",
+            "release/Jevora-IDE-Portable-$($tag.TrimStart('v')).exe",
+            "release/latest.yml"
+          )
+          # idempotent: re-running the workflow uploads to the existing release
+          if (gh release view $tag > $null 2>&1) {
+            gh release upload $tag @assets --clobber
+          } else {
+            gh release create $tag @assets --title "Jevora IDE $tag" --generate-notes
+          }
