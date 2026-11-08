@@ -1,6 +1,6 @@
 [project]
 name = "jevora-ide"
-version = "0.2.0"
+version = "0.4.0"
 description = "Jevora IDE (IDE Coder) — agent-native, local-first IDE backend"
 readme = "README.md"
 requires-python = ">=3.11"

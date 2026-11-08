@@ -1,7 +1,7 @@
 {
   "name": "jevora-ide",
   "productName": "Jevora IDE",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Jevora IDE desktop shell — agent-native IDE backend (FastAPI) wrapped in Electron, with auto-update via GitHub releases",
   "main": "electron/main.js",
   "private": true,
