@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=12">
+  <link rel="stylesheet" href="styles.css?v=13">
   <script>
     // Apply the saved theme before first paint to avoid a flash.
     (function () {
@@ -229,13 +229,6 @@
             <div class="input-row-container" id="inputRowContainer">
               <div class="conversation-context" id="conversationContext" hidden>
                 <div class="conversation-context-copy"><strong id="conversationTitle"></strong><span id="conversationHint">Your conversation is ready to continue.</span></div>
-                <div class="conversation-actions">
-                  <button class="conversation-action-btn" id="conversationRenameBtn" type="button" title="Rename conversation">Rename</button>
-                  <button class="conversation-action-btn" id="conversationMoveBtn" type="button" title="Move this chat into a project">Move</button>
-                  <button class="conversation-action-btn" id="conversationBranchBtn" type="button" title="Branch conversation">Branch</button>
-                  <button class="conversation-action-btn danger" id="conversationDeleteBtn" type="button" title="Delete conversation">Delete</button>
-                  <button class="continue-conversation-btn" id="continueConversationBtn" type="button">Continue <span aria-hidden="true">↗</span></button>
-                </div>
               </div>
               <div class="input-card-box">
                 <div class="input-field-wrapper">
@@ -390,21 +383,18 @@
 
               <div class="provider-available-list">
                 <button class="provider-available-item" data-provider="openai" type="button">
-                  <span class="provider-logo openai-logo">GPT</span>
                   <div class="provider-item-text">
                     <span class="provider-item-name">OpenAI</span>
                     <span class="provider-item-sub">GPT-4o, o1, o3-mini &amp; more</span>
                   </div>
                 </button>
                 <button class="provider-available-item" data-provider="google" type="button">
-                  <span class="provider-logo google-logo">G</span>
                   <div class="provider-item-text">
                     <span class="provider-item-name">Google</span>
                     <span class="provider-item-sub">Gemini 2.5 Pro, Flash &amp; more</span>
                   </div>
                 </button>
                 <button class="provider-available-item" data-provider="anthropic" type="button">
-                  <span class="provider-logo anthropic-logo">&#9670;</span>
                   <div class="provider-item-text">
                     <span class="provider-item-name">Anthropic</span>
                     <span class="provider-item-sub">Claude 3.5, 3.7 Sonnet &amp; more</span>
@@ -551,7 +541,7 @@
 
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=14"></script>
   <script src="theme.js?v=2"></script>
   <script src="shell.js?v=1"></script>
   <script src="panels.js?v=3"></script>

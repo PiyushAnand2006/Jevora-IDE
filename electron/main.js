@@ -114,6 +114,23 @@ function createMainWindow(url) {
       spellcheck: true,
     },
   });
+  // Agent-first chrome: no File/Edit/View menu bar — this is an agent IDE,
+  // not a VS Code-style shell. macOS has no in-window menu (it lives in the
+  // system bar) and keeps the default menu for copy/paste/quit shortcuts.
+  if (process.platform !== "darwin") {
+    mainWindow.setMenu(null);
+    // Removing the menu also removes its accelerators; keep DevTools on the
+    // usual shortcut in unpackaged dev runs.
+    if (!app.isPackaged) {
+      mainWindow.webContents.on("before-input-event", (event, input) => {
+        if (input.type === "keyDown" && input.control && input.shift
+            && input.key.toLowerCase() === "i") {
+          mainWindow.webContents.toggleDevTools();
+          event.preventDefault();
+        }
+      });
+    }
+  }
   mainWindow.on("ready-to-show", () => mainWindow.show());
   mainWindow.on("closed", () => {
     mainWindow = null;

@@ -215,9 +215,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const drawerCloseBtn = $('drawerCloseBtn');
   const commandPopover = $('commandPopover');
   const webSearchToggleBtn = $('webSearchToggleBtn');
-  const conversationRenameBtn = $('conversationRenameBtn');
-  const conversationBranchBtn = $('conversationBranchBtn');
-  const conversationDeleteBtn = $('conversationDeleteBtn');
 
   let currentMode = 'chat';
   let activeTab = 'build';
@@ -322,14 +319,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (context) context.hidden = !conversationId;
     if ($('conversationTitle')) $('conversationTitle').textContent = activeConversationTitle || 'Conversation';
     if ($('conversationHint')) $('conversationHint').textContent = busy ? 'An agent is working on this conversation.' : 'Your conversation is ready to continue.';
-    if ($('continueConversationBtn')) $('continueConversationBtn').disabled = busy;
-    if (conversationRenameBtn) conversationRenameBtn.disabled = busy;
-    if (conversationBranchBtn) conversationBranchBtn.disabled = busy;
-    if (conversationDeleteBtn) conversationDeleteBtn.disabled = busy;
-    if (conversationRenameBtn) conversationRenameBtn.hidden = !conversationId;
-    if (conversationBranchBtn) conversationBranchBtn.hidden = !conversationId;
-    if (conversationDeleteBtn) conversationDeleteBtn.hidden = !conversationId;
-    if (conversationMoveBtn) { conversationMoveBtn.disabled = busy; conversationMoveBtn.hidden = !conversationId; }
     document.querySelectorAll('[data-conversation-id]').forEach((row) => {
       const selected = row.dataset.conversationId === conversationId;
       row.classList.toggle('selected', selected);
@@ -337,65 +326,97 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  $('continueConversationBtn')?.addEventListener('click', () => { agentInput.focus(); });
+  // ---- Conversation actions (driven by the ⋯ menu on each sidebar row) ----
 
-  conversationRenameBtn?.addEventListener('click', async () => {
-    if (!conversationId || conversationRenameBtn.disabled) return;
-    const next = await askText('Conversation name', activeConversationTitle || 'Conversation');
+  function conversationBusy() {
+    return conversationLoading || runStarting || [...activeRunViews].some((view) => !view.finished);
+  }
+
+  async function renameConversationById(id, currentTitle) {
+    if (conversationBusy()) { showToast('The agent is working — try again when it finishes'); return; }
+    const next = await askText('Conversation name', (id === conversationId ? activeConversationTitle : currentTitle) || 'Conversation');
     if (next === null) return;
     const title = next.trim();
     if (!title) { showToast('Conversation name cannot be empty'); return; }
     try {
-      const updated = await api.patch(`/api/conversations/${encodeURIComponent(conversationId)}`, { title });
-      activeConversationTitle = updated.title || title;
-      updateConversationComposer();
+      const updated = await api.patch(`/api/conversations/${encodeURIComponent(id)}`, { title });
+      if (id === conversationId) {
+        activeConversationTitle = updated.title || title;
+        updateConversationComposer();
+      }
       refreshConversationLists();
     } catch (error) { showToast(`Rename failed: ${error.message}`); }
-  });
+  }
 
-  conversationBranchBtn?.addEventListener('click', async () => {
-    if (!conversationId || conversationBranchBtn.disabled) return;
+  async function branchConversationById(id) {
+    if (conversationBusy()) { showToast('The agent is working — try again when it finishes'); return; }
     try {
-      const branch = await api.post(`/api/conversations/${encodeURIComponent(conversationId)}/branch`, {});
+      const branch = await api.post(`/api/conversations/${encodeURIComponent(id)}/branch`, {});
       showToast('Conversation branch created');
       await openConversation(branch.id);
       refreshConversationLists();
     } catch (error) { showToast(`Branch failed: ${error.message}`); }
-  });
+  }
 
-  conversationDeleteBtn?.addEventListener('click', async () => {
-    if (!conversationId || conversationDeleteBtn.disabled) return;
+  async function deleteConversationById(id) {
+    if (conversationBusy()) { showToast('The agent is working — try again when it finishes'); return; }
     if (!window.confirm('Delete this conversation and its saved runs?')) return;
-    const id = conversationId;
     try {
       await api.del(`/api/conversations/${encodeURIComponent(id)}`);
-      resetConversation('Conversation deleted');
+      if (id === conversationId) resetConversation('Conversation deleted');
+      else showToast('Conversation deleted');
       refreshConversationLists();
     } catch (error) { showToast(`Delete failed: ${error.message}`); }
-  });
+  }
 
-  const conversationMoveBtn = $('conversationMoveBtn');
-  conversationMoveBtn?.addEventListener('click', async () => {
-    if (!conversationId || conversationMoveBtn.disabled) return;
+  // Modal picker: choose the target project for a chat. Resolves the project
+  // id, null for "standalone", or undefined when cancelled.
+  function pickProject(currentProjectId) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'asktext-overlay';
+      const options = [{ id: null, name: 'No project (standalone)' }]
+        .concat(projectsCache.map((p) => ({ id: p.id, name: p.name, path: p.root_path })));
+      overlay.innerHTML = `
+        <div class="asktext-box movechat-box">
+          <div class="asktext-label">Move chat to…</div>
+          <div class="movechat-list"></div>
+          <div class="asktext-actions"><button class="asktext-cancel" type="button">Cancel</button></div>
+        </div>`;
+      const list = overlay.querySelector('.movechat-list');
+      const cleanup = () => { document.removeEventListener('keydown', onKey); overlay.remove(); };
+      const onKey = (e) => { if (e.key === 'Escape') { cleanup(); resolve(undefined); } };
+      document.addEventListener('keydown', onKey);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(undefined); } });
+      overlay.querySelector('.asktext-cancel').addEventListener('click', () => { cleanup(); resolve(undefined); });
+      options.forEach((opt) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'movechat-item' + (opt.id === currentProjectId ? ' current' : '');
+        item.innerHTML = `<span class="movechat-name"></span>${opt.id === currentProjectId ? '<span class="movechat-current">current</span>' : ''}`;
+        item.querySelector('.movechat-name').textContent = opt.name;
+        if (opt.path) item.title = opt.path;
+        item.addEventListener('click', () => { cleanup(); resolve(opt.id); });
+        list.appendChild(item);
+      });
+      document.body.appendChild(overlay);
+    });
+  }
+
+  async function moveConversationById(id) {
+    if (conversationBusy()) { showToast('The agent is working — try again when it finishes'); return; }
     await loadProjects();
-    if (!projectsCache.length) { showToast('Create a project first (Projects → +)'); return; }
-    const list = projectsCache.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
-    const answer = await askText(`Move this chat to which project? ${list} (empty = remove from its project)`, '1');
-    if (answer === null) return;
-    const trimmed = answer.trim();
-    let projectId = null;
-    if (trimmed) {
-      const index = parseInt(trimmed, 10) - 1;
-      if (Number.isNaN(index) || !projectsCache[index]) { showToast('Invalid selection'); return; }
-      projectId = projectsCache[index].id;
-    }
+    const current = lastSidebarConversations.find((c) => c.id === id);
+    const target = await pickProject(current?.project_id || null);
+    if (target === undefined) return; // cancelled
+    if (target === (current?.project_id || null)) { showToast('Chat is already there'); return; }
     try {
-      await api.patch(`/api/conversations/${encodeURIComponent(conversationId)}`,
-        { project_id: projectId, detach_project: !projectId });
-      showToast(projectId ? 'Chat moved into the project' : 'Chat removed from its project');
+      await api.patch(`/api/conversations/${encodeURIComponent(id)}`,
+        { project_id: target, detach_project: !target });
+      showToast(target ? 'Chat moved into the project' : 'Chat removed from its project — now standalone');
       refreshConversationLists();
     } catch (error) { showToast(`Move failed: ${error.message}`); }
-  });
+  }
 
   function beginConversationSession(clearStored = true) {
     sessionRevision += 1;
@@ -1720,25 +1741,69 @@ document.addEventListener('DOMContentLoaded', () => {
           <button class="chip-btn" type="button" data-act="health">Check</button><button class="chip-btn danger" type="button" data-act="delete">Remove</button></div></div>`).join('') || '<div class="drawer-muted">No MCP servers yet.</div>'}</div>
       <details class="drawer-card"><summary style="cursor:pointer;font-weight:600">Add MCP server</summary>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
-          <input class="drawer-input" id="mcpName" placeholder="Name (e.g. filesystem)">
-          <select class="drawer-select" id="mcpTransport"><option value="stdio">stdio (local command)</option><option value="http">Streamable HTTP</option><option value="sse">SSE</option></select>
-          <input class="drawer-input" id="mcpCommand" placeholder="Command (e.g. npx)">
-          <input class="drawer-input" id="mcpArgs" placeholder="Arguments (space separated)">
-          <input class="drawer-input" id="mcpUrl" placeholder="URL (http/sse)" style="display:none">
+          <textarea class="drawer-input drawer-textarea" id="mcpJson" rows="9" spellcheck="false"
+            placeholder='{"mcpServers": {
+  "filesystem": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
+    "env": { "KEY": "value" }
+  }
+}}'
+            style="min-height:150px"></textarea>
+          <div class="drawer-muted" style="font-size:11px;line-height:1.5">Paste a Cursor / Claude&nbsp;Desktop-style JSON config — the full
+            <code>{"mcpServers": {...}}</code> map (multiple servers at once), a single named server, or a bare
+            <code>{"command": ..., "args": [...]}</code> object. Remote servers use <code>{"url": ...}</code> with optional
+            <code>"type": "http" | "sse"</code> and <code>"headers"</code>.</div>
           <button class="chip-btn primary" type="button" id="mcpAdd">Add server</button></div></details></div>`;
-    $('mcpTransport').addEventListener('change', (e) => {
-      const stdio = e.target.value === 'stdio';
-      $('mcpCommand').style.display = stdio ? '' : 'none';
-      $('mcpArgs').style.display = stdio ? '' : 'none';
-      $('mcpUrl').style.display = stdio ? 'none' : '';
-    });
     $('mcpAdd').addEventListener('click', async () => {
-      const transport = $('mcpTransport').value;
-      const body = { name: $('mcpName').value.trim(), transport };
-      if (transport === 'stdio') { body.command = $('mcpCommand').value.trim(); body.args = $('mcpArgs').value.trim().split(/\s+/).filter(Boolean); }
-      else body.url = $('mcpUrl').value.trim();
-      try { const s = await api.post('/api/mcp/servers', body); showToast(`${s.name}: ${s.status}`); renderMcpDrawer(); }
-      catch (error) { showToast(error.message); }
+      const raw = $('mcpJson').value.trim();
+      if (!raw) { showToast('Paste a JSON config first'); return; }
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch (error) { showToast(`Invalid JSON: ${error.message}`); return; }
+      // Accept the Cursor / Claude Desktop formats:
+      //  1. {"mcpServers": { "<name>": { ... } }}  — full map, multiple servers
+      //  2. { "name": "...", "command"|"url": ... } — single named server
+      //  3. { "command"|"url": ... }               — bare server (map fallback)
+      let entries;
+      if (parsed && typeof parsed === 'object' && parsed.mcpServers && typeof parsed.mcpServers === 'object') {
+        entries = Object.entries(parsed.mcpServers);
+      } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          && (parsed.command || parsed.url)) {
+        entries = [[parsed.name || '', parsed]];
+      } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        entries = Object.entries(parsed);
+      } else { showToast('Unrecognized format — expected {"mcpServers": {...}}'); return; }
+      if (!entries.length) { showToast('No servers found in the JSON'); return; }
+      const results = [];
+      for (const [mapName, cfg] of entries) {
+        if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) { results.push(`${mapName || 'server'}: skipped (bad config)`); continue; }
+        const serverName = String(cfg.name || mapName || '').trim();
+        if (!serverName) { results.push('server: skipped (missing name)'); continue; }
+        const body = { name: serverName };
+        if (cfg.url) {
+          body.url = String(cfg.url);
+          const type = String(cfg.type || '').toLowerCase();
+          body.transport = type === 'sse' ? 'sse'
+            : (type === 'http' || type === 'streamable-http' || type === 'streamable_http') ? 'http'
+            : (/\/sse/i.test(body.url) ? 'sse' : 'http');
+          if (cfg.headers && typeof cfg.headers === 'object') body.headers = cfg.headers;
+        } else if (cfg.command) {
+          body.transport = 'stdio';
+          body.command = String(cfg.command);
+          body.args = Array.isArray(cfg.args) ? cfg.args.map(String)
+            : String(cfg.args || '').trim().split(/\s+/).filter(Boolean);
+          if (cfg.env && typeof cfg.env === 'object') body.env = cfg.env;
+        } else { results.push(`${serverName}: skipped (needs "command" or "url")`); continue; }
+        try {
+          const s = await api.post('/api/mcp/servers', body);
+          results.push(`${s.name}: ${s.status}`);
+        } catch (error) {
+          results.push(`${serverName}: failed (${error.message})`);
+        }
+      }
+      showToast(results.join(' · '));
+      renderMcpDrawer();
     });
     drawerBody.querySelectorAll('#mcpServers [data-id]').forEach((card) => {
       const id = card.dataset.id;
@@ -1797,10 +1862,65 @@ document.addEventListener('DOMContentLoaded', () => {
     return Number.isNaN(date.getTime()) ? 'Older' : date.toLocaleDateString([], { month: 'long', year: 'numeric' });
   }
 
+  // ---- Row "⋯" actions menu (ZCode-style dropdown on each conversation row) ----
+  let rowActionsMenu = null;
+  let rowActionsTarget = null; // { id, title }
+
+  function ensureRowActionsMenu() {
+    if (rowActionsMenu) return rowActionsMenu;
+    rowActionsMenu = document.createElement('div');
+    rowActionsMenu.className = 'row-actions-menu';
+    rowActionsMenu.setAttribute('role', 'menu');
+    rowActionsMenu.hidden = true;
+    rowActionsMenu.innerHTML = `
+      <button class="row-actions-item" data-act="rename" type="button" role="menuitem">Rename</button>
+      <button class="row-actions-item" data-act="move" type="button" role="menuitem">Move to project</button>
+      <button class="row-actions-item" data-act="branch" type="button" role="menuitem">Branch</button>
+      <div class="row-actions-sep" role="separator"></div>
+      <button class="row-actions-item danger" data-act="delete" type="button" role="menuitem">Delete</button>`;
+    document.body.appendChild(rowActionsMenu);
+    rowActionsMenu.addEventListener('click', (e) => {
+      const item = e.target.closest('.row-actions-item');
+      if (!item || !rowActionsTarget) return;
+      const { id, title } = rowActionsTarget;
+      closeRowActionsMenu();
+      if (item.dataset.act === 'rename') renameConversationById(id, title);
+      else if (item.dataset.act === 'move') moveConversationById(id);
+      else if (item.dataset.act === 'branch') branchConversationById(id);
+      else if (item.dataset.act === 'delete') deleteConversationById(id);
+    });
+    document.addEventListener('click', (e) => {
+      if (rowActionsMenu.hidden || e.target.closest('.row-kebab')) return;
+      if (!rowActionsMenu.contains(e.target)) closeRowActionsMenu();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !rowActionsMenu.hidden) closeRowActionsMenu(); });
+    window.addEventListener('resize', closeRowActionsMenu);
+    return rowActionsMenu;
+  }
+
+  function openRowActionsMenu(btn, target) {
+    const menu = ensureRowActionsMenu();
+    rowActionsTarget = target;
+    const rect = btn.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, rect.right - 186)}px`;
+    menu.hidden = false;
+    // Flip above the kebab when the menu would overflow the viewport bottom.
+    const h = menu.offsetHeight;
+    let top = rect.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, rect.top - h - 6);
+    menu.style.top = `${top}px`;
+  }
+
+  function closeRowActionsMenu() {
+    if (rowActionsMenu) rowActionsMenu.hidden = true;
+    rowActionsTarget = null;
+  }
+
   function chatRow(conversation, compact = false) {
-    const row = document.createElement('button');
-    row.type = 'button';
+    const row = document.createElement('div');
     row.className = `conversation-row${conversation.id === conversationId ? ' selected' : ''}${compact ? ' compact' : ''}`;
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
     row.dataset.conversationId = conversation.id;
     row.setAttribute('aria-current', conversation.id === conversationId ? 'true' : 'false');
     row.title = conversation.title || 'Untitled conversation';
@@ -1809,10 +1929,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const preview = typeof conversation.last_message === 'string' ? conversation.last_message : conversation.last_message?.content || '';
     const time = compact ? relTime(conversation.updated_at || conversation.created_at)
       : formatTime(conversation.updated_at || conversation.created_at);
-    row.innerHTML = `<div class="conversation-row-top">${modeBadge(conversation.mode)}<strong>${escapeHtml(conversation.title || 'Untitled conversation')}</strong>${active ? '<span class="conversation-live">Active</span>' : ''}${compact && time ? `<span class="conversation-time">${escapeHtml(time)}</span>` : ''}</div>
+    row.innerHTML = `<div class="conversation-row-top">${modeBadge(conversation.mode)}<strong>${escapeHtml(conversation.title || 'Untitled conversation')}</strong>${active ? '<span class="conversation-live">Active</span>' : ''}${compact && time ? `<span class="conversation-time">${escapeHtml(time)}</span>` : ''}<span class="row-kebab" role="button" aria-label="Conversation actions" title="Conversation actions"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></span></div>
       ${!compact && preview ? `<div class="conversation-preview">${escapeHtml(preview.slice(0, 180))}</div>` : ''}
       ${!compact ? `<div class="conversation-meta"><span>${count} message${count === 1 ? '' : 's'}</span><span>${escapeHtml(time)}</span></div>` : ''}`;
-    row.addEventListener('click', () => openConversation(conversation.id));
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.row-kebab')) return; // kebab handles its own click
+      openConversation(conversation.id);
+    });
+    row.addEventListener('keydown', (e) => {
+      if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('.row-kebab')) {
+        e.preventDefault();
+        openConversation(conversation.id);
+      }
+    });
+    row.querySelector('.row-kebab').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = ensureRowActionsMenu();
+      const openForSame = !menu.hidden && rowActionsTarget && rowActionsTarget.id === conversation.id;
+      if (openForSame) closeRowActionsMenu();
+      else openRowActionsMenu(e.currentTarget, { id: conversation.id, title: conversation.title || 'Untitled conversation' });
+    });
     return row;
   }
 
@@ -1857,6 +1993,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (project) showToast(`New chats will be created in “${project.name}”`);
   }
 
+  // Start a fresh chat scoped to a project (or standalone when project is null).
+  function startChatInProject(project) {
+    setActiveProject(project);
+    if (!project) showToast('New chats will be created without a project');
+    resetConversation(project ? `New chat in “${project.name}”` : 'Started standalone chat');
+    agentInput?.focus();
+  }
+
   function expandedProjects() {
     let ids = [];
     try { ids = JSON.parse(localStorage.getItem('jevora_expanded_projects') || '[]'); } catch (_) { ids = []; }
@@ -1889,17 +2033,38 @@ document.addEventListener('DOMContentLoaded', () => {
       <span class="project-folder">${folderSvg}</span>
       <strong>${escapeHtml(project.name)}</strong>
       ${isActive ? '<span class="project-active-pill">Active</span>' : ''}
-      <span class="project-count">${chats.length || ''}</span>`;
+      <span class="project-count">${chats.length || ''}</span>
+      <span class="project-add-chat" role="button" tabindex="0" title="New chat in this project">${plusSvg}</span>`;
     head.addEventListener('click', () => {
       toggleExpandedProject(project.id);
       setActiveProject(isActive ? null : { id: project.id, name: project.name });
+    });
+    const addBtn = head.querySelector('.project-add-chat');
+    addBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      startChatInProject({ id: project.id, name: project.name });
+    });
+    addBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        startChatInProject({ id: project.id, name: project.name });
+      }
     });
     wrap.appendChild(head);
     if (expanded) {
       const list = document.createElement('div');
       list.className = 'project-chats';
       if (chats.length) chats.forEach((c) => list.appendChild(chatRow(c, true)));
-      else list.innerHTML = '<div class="project-chat-empty">No chats in this project yet</div>';
+      else {
+        const empty = document.createElement('button');
+        empty.type = 'button';
+        empty.className = 'project-chat-empty project-chat-new';
+        empty.title = `Start a chat in ${project.name}`;
+        empty.textContent = 'No chats in this project yet — start one here';
+        empty.addEventListener('click', () => startChatInProject({ id: project.id, name: project.name }));
+        list.appendChild(empty);
+      }
       wrap.appendChild(list);
     }
     return wrap;
@@ -1942,8 +2107,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const chatsLabel = document.createElement('div');
-    chatsLabel.className = 'conversation-section-label chats-label';
-    chatsLabel.textContent = projectsCache.length ? 'Chats' : 'Recent conversations';
+    chatsLabel.className = 'conversation-section-label chats-label label-with-actions';
+    chatsLabel.innerHTML = `<span>${projectsCache.length ? 'Chats' : 'Recent conversations'}</span>` +
+      `<button class="sidebar-mini-btn" id="newStandaloneChatBtn" type="button" title="New chat without a project">${plusSvg}</button>`;
+    chatsLabel.querySelector('#newStandaloneChatBtn').addEventListener('click', () => startChatInProject(null));
     container.appendChild(chatsLabel);
     const chatsBox = document.createElement('div');
     if (standalone.length) standalone.forEach((c) => chatsBox.appendChild(chatRow(c, true)));
@@ -2654,11 +2821,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'provider-available-item';
-      item.innerHTML = `<span class="provider-logo custom-logo">${escapeHtml(entry.name.slice(0, 2).toUpperCase())}</span>
-        <div class="provider-item-text"><span class="provider-item-name">${escapeHtml(entry.name)}</span>
+      item.innerHTML = `<div class="provider-item-text"><span class="provider-item-name">${escapeHtml(entry.name)}</span>
         <span class="provider-item-sub">${escapeHtml(entry.sub)}</span></div>`;
       item.addEventListener('click', async () => {
-        const apiKey = prompt(`Enter your API key for ${entry.name}${entry.id === 'lmstudio' ? ' (leave empty for a local server)' : ''}:`, '');
+        // window.prompt() is not supported in Electron — use the in-app dialog.
+        const apiKey = await askText(`Enter your API key for ${entry.name}${entry.id === 'lmstudio' ? ' (leave empty for a local server)' : ''}`, 'API key');
         if (apiKey === null) return;
         const saved = await saveProvider({ name: entry.name, url: entry.url, apiKey: apiKey || '' });
         if (saved) showToast(`${entry.name} saved!`);
@@ -2673,7 +2840,8 @@ document.addEventListener('DOMContentLoaded', () => {
     item.addEventListener('click', async () => {
       const defaults = PROVIDER_DEFAULTS[item.dataset.provider];
       if (!defaults) return;
-      const apiKey = prompt(`Enter your API key for ${defaults.name}:`, '');
+      // window.prompt() is not supported in Electron — use the in-app dialog.
+      const apiKey = await askText(`Enter your API key for ${defaults.name}:`, 'API key');
       if (apiKey === null) return;
       const saved = await saveProvider({ name: defaults.name, url: defaults.url, apiKey: apiKey || '' });
       if (saved) showToast(`${defaults.name} saved!`);
