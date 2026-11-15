@@ -225,6 +225,12 @@ class RunExecutor:
             with correlation(run_id=run_id):
                 if self.runner is None:
                     raise RuntimeError("no orchestrator runner configured")
+                # Leave "queued" the moment the slot is granted: the UI shows a
+                # live run while the graph/checkpoint boots, not a frozen queue.
+                try:
+                    await handle.recorder.set_status("running")
+                except Exception:
+                    log.exception("could not mark run %s running at dispatch", run_id)
                 await self.runner(handle)
         except asyncio.CancelledError:
             if handle.cancelled:

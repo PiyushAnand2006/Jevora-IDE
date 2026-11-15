@@ -436,7 +436,12 @@ class ProviderRouter:
                                   json_schema=json_schema, json_mode=json_mode, stream=stream,
                                   temperature=temperature, max_tokens=max_tokens,
                                   web_search=require_capability == "web_search")
-            breaker = self.breakers.get(binding.provider_id)
+            # Circuit-break per provider+model binding, never per provider: one
+            # broken model must not block every other model the user switches to
+            # on the same provider (for an explicit model pick the fallback chain
+            # is a single binding, so an open provider breaker used to fail the
+            # whole chat until the reset window elapsed).
+            breaker = self.breakers.get(f"{binding.provider_id}:{binding.model}")
             started = time.perf_counter()
 
             async def attempt(adapter: Any = adapter, request: ChatRequest = request,

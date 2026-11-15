@@ -308,6 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (conversationId) localStorage.setItem(conversationStorageKey(), conversationId);
       else localStorage.removeItem(conversationStorageKey());
     } catch (_) { /* Private browsing can disable persistence. */ }
+    applyModelFor(conversationId); // switch the composer to this chat's model
   }
 
   function updateConversationComposer() {
@@ -579,6 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function resetConversation(message) {
     beginConversationSession();
+    applyModelFor(null); // a fresh task starts with the latest default model
     chatStageWrapper?.classList.remove('chat-active');
     if (streamContainer) { streamContainer.innerHTML = ''; streamContainer.style.display = 'none'; }
     if (agentInput) { agentInput.value = ''; agentInput.style.height = 'auto'; agentInput.focus(); }
@@ -1008,20 +1010,22 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   class RunView {
-    constructor(runId, label) {
+    constructor(runId, label, opts = {}) {
       this.runId = runId;
       this.sessionRevision = sessionRevision;
       this.disposed = false;
+      this.minimal = !!opts.minimal; // chat: stream the answer, no orchestration chrome
       activeRunViews.add(this);
       this.nodes = new Map();
       this.lastSeq = 0;
       this.finished = false;
       this.streamed = '';
       this.el = document.createElement('div');
-      this.el.className = 'message-bubble agent';
+      this.el.className = `message-bubble agent${this.minimal ? ' run-minimal' : ''}`;
       this.el.innerHTML = `
         <div class="bubble-header"><span class="tool-dot"></span><span>${escapeHtml(label)}</span></div>
         <div class="bubble-content">
+          <div class="chat-typing" style="display:none"><span class="typing-indicator" style="color:var(--text-secondary);"><span style="display:inline-block;animation:pulse 1s infinite;">●</span> thinking…</span></div>
           <div class="run-meta-row">
             <span class="run-status-chip"><span class="pulse"></span><span class="rs-text">queued</span></span>
             <span class="drawer-muted rs-models"></span>
@@ -1034,6 +1038,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="decision-line"></div>
           <div class="escalation-slot"></div>
         </div>`;
+      this.typingEl = this.el.querySelector('.chat-typing');
       this.statusChip = this.el.querySelector('.run-status-chip');
       this.statusText = this.el.querySelector('.rs-text');
       this.models = this.el.querySelector('.rs-models');
@@ -1049,7 +1054,7 @@ document.addEventListener('DOMContentLoaded', () => {
       this.cancelBtn.addEventListener('click', () => this.cancel());
       // governance timeline + per-run diff (panels.js)
       const metaRow = this.el.querySelector('.run-meta-row');
-      if (metaRow && this.runId) {
+      if (metaRow && this.runId && !this.minimal) {
         const tl = document.createElement('button');
         tl.className = 'run-cancel-btn';
         tl.type = 'button';
@@ -1066,6 +1071,7 @@ document.addEventListener('DOMContentLoaded', () => {
         metaRow.insertBefore(diffBtn, this.cancelBtn);
       }
       this.treeBox.style.display = 'none';
+      if (this.minimal) this.typingEl.style.display = '';
     }
 
     isCurrent() { return !this.disposed && this.sessionRevision === sessionRevision; }
@@ -1081,6 +1087,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const pulse = this.statusChip.querySelector('.pulse');
       if (pulse) pulse.style.display = TERMINAL.includes(status) ? 'none' : '';
       this.cancelBtn.style.display = ['done', 'failed'].includes(status) ? 'none' : '';
+      if (this.typingEl && TERMINAL.includes(status)) this.typingEl.style.display = 'none';
       if (this.tasks && TERMINAL.includes(status)) {
         const state = status === 'done' ? 'done' : 'failed';
         this.tasksEl.querySelectorAll('li[data-task]').forEach((li) => {
@@ -1179,6 +1186,7 @@ document.addEventListener('DOMContentLoaded', () => {
           break;
         case 'token.delta':
           this.streamed += data.text || '';
+          if (this.streamed) this.typingEl.style.display = 'none';
           this.streamEl.textContent = this.streamed;
           scrollMessagesToBottom();
           break;
@@ -1249,6 +1257,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!this.isCurrent()) return;
       this.finished = true;
       this.setStatus(run.status);
+      this.typingEl.style.display = 'none';
       this.streamEl.textContent = '';
       this.finalEl.innerHTML = renderMarkdown(run.final_output || 'The run completed without an output.');
       this.el.querySelector('.message-actions')?.remove();
@@ -1421,9 +1430,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (conversationId) body.conversation_id = conversationId;
       const created = await api.post('/api/runs', body);
       if (revision !== sessionRevision) return;
-      if (created.conversation_id) setConversationId(created.conversation_id);
+      if (created.conversation_id) {
+        setConversationId(created.conversation_id);
+        // pin the composer's model to the freshly created chat
+        saveModelFor(created.conversation_id, {
+          key: selectedModel.key, label: selectedModel.label,
+          badge: modelBadge?.textContent || `${selectedModel.label} ›`,
+        });
+      }
       if (!activeConversationTitle) activeConversationTitle = prompt.slice(0, 100);
-      const view = new RunView(created.id, label);
+      const view = new RunView(created.id, selectedAgent ? label : (currentMode === 'chat' ? 'Chat' : label),
+        { minimal: currentMode === 'chat' && !selectedAgent });
       placeholder.replaceWith(view.el);
       view.setStatus(created.status);
       if (TERMINAL.includes(created.status)) view.finalize(created);
@@ -2034,11 +2051,31 @@ document.addEventListener('DOMContentLoaded', () => {
       <strong>${escapeHtml(project.name)}</strong>
       ${isActive ? '<span class="project-active-pill">Active</span>' : ''}
       <span class="project-count">${chats.length || ''}</span>
-      <span class="project-add-chat" role="button" tabindex="0" title="New chat in this project">${plusSvg}</span>`;
+      <span class="project-add-chat" role="button" tabindex="0" title="New chat in this project">${plusSvg}</span>
+      ${project.is_default ? '' : `<span class="project-add-chat project-del" role="button" tabindex="0" title="Delete project">${trashSvg}</span>`}`;
     head.addEventListener('click', () => {
       toggleExpandedProject(project.id);
       setActiveProject(isActive ? null : { id: project.id, name: project.name });
     });
+    const deleteBtn = head.querySelector('.project-del');
+    if (deleteBtn) {
+      const deleteProject = async () => {
+        const msg = chats.length
+          ? `Delete project “${project.name}”? Its ${chats.length} chat${chats.length === 1 ? '' : 's'} will become standalone conversations.`
+          : `Delete project “${project.name}”?`;
+        if (!window.confirm(msg)) return;
+        try {
+          await api.del(`/api/projects/${encodeURIComponent(project.id)}`);
+          if (getActiveProject()?.id === project.id) setActiveProject(null);
+          showToast(`Project “${project.name}” deleted${chats.length ? ` · ${chats.length} chat${chats.length === 1 ? '' : 's'} moved to standalone` : ''}`);
+          refreshConversationLists();
+        } catch (error) { showToast(`Delete failed: ${error.message}`); }
+      };
+      deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteProject(); });
+      deleteBtn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); deleteProject(); }
+      });
+    }
     const addBtn = head.querySelector('.project-add-chat');
     addBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2072,6 +2109,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
   const plusSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  const trashSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 
   function renderProjectsSection(conversations) {
     if (conversations) lastSidebarConversations = conversations;
@@ -2305,7 +2343,8 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       if (!messages.length && !unfinished.length) streamContainer.innerHTML = '<div class="conversation-empty"><strong>This conversation is ready</strong><span>Send a message to pick up where you left off.</span></div>';
       unfinished.forEach((run) => {
-        const view = new RunView(run.id, `IDE Agent (${currentMode.toUpperCase()}) · Live run`);
+        const view = new RunView(run.id, `IDE Agent (${currentMode.toUpperCase()}) · Live run`,
+          { minimal: currentMode === 'chat' });
         streamContainer.appendChild(view.el);
         view.setStatus(run.status);
         if (run.escalation) view.showEscalation(run.escalation);
@@ -2682,6 +2721,34 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   loadSavedProviders();
   let selectedModel = { key: 'auto', label: 'Auto' };
+  // Per-conversation model memory: each chat remembers the model it was created
+  // with (or last switched to), like a per-tab choice. New chats follow the most
+  // recent selection; opening a chat swaps the composer back to its own model.
+  let defaultModel = { key: 'auto', label: 'Auto', badge: 'Auto ›' };
+  const modelOverrideKey = (id) => `jevora.model:${currentUser?.id || 'local'}:${id}`;
+
+  function loadModelFor(conversationId) {
+    if (!conversationId) return null;
+    try {
+      const raw = JSON.parse(localStorage.getItem(modelOverrideKey(conversationId)) || 'null');
+      return raw && raw.key ? raw : null;
+    } catch (_) { return null; }
+  }
+
+  function saveModelFor(conversationId, model) {
+    if (!conversationId) return;
+    try { localStorage.setItem(modelOverrideKey(conversationId), JSON.stringify({ key: model.key, label: model.label, badge: model.badge })); }
+    catch (_) { /* private mode */ }
+  }
+
+  function applyModelFor(conversationId) {
+    const model = (conversationId ? loadModelFor(conversationId) : null) || defaultModel;
+    const changed = model.key !== selectedModel.key;
+    selectedModel = { key: model.key, label: model.label };
+    if (modelBadge) modelBadge.textContent = model.badge || `${model.label} ›`;
+    syncSelectedModelUI();
+    if (changed) refreshWebSearchStatus();
+  }
 
   async function refreshWebSearchStatus() {
     try {
@@ -2769,10 +2836,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function setSelectedModel(key, label) {
-    selectedModel = { key, label };
+  function setSelectedModel(key, label, badgeText) {
+    const model = { key, label, badge: badgeText || `${label} ›` };
+    selectedModel = model;
+    if (!conversationId) defaultModel = model; // a choice made for a new chat becomes the default
+    saveModelFor(conversationId, model);       // pin to the open chat (if any)
     syncSelectedModelUI();
-    if (modelBadge) modelBadge.textContent = `${label} ›`;
+    if (modelBadge) modelBadge.textContent = model.badge;
     refreshWebSearchStatus();
   }
 
@@ -2957,8 +3027,7 @@ document.addEventListener('DOMContentLoaded', () => {
         item.dataset.modelKey = `${provider.id}:${model}`;
         item.textContent = model;
         item.addEventListener('click', () => {
-          setSelectedModel(`${provider.id}:${model}`, model);
-          if (modelBadge) modelBadge.textContent = `${provider.name} · ${model} ›`;
+          setSelectedModel(`${provider.id}:${model}`, model, `${provider.name} · ${model} ›`);
           showToast(`Model set to ${model}`);
           closeAllPanels();
         });

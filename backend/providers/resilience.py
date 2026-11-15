@@ -51,6 +51,13 @@ class CircuitBreaker:
         if self.failures >= self.threshold or self.opened_at is not None:
             self.opened_at = self.clock()
 
+    def rejection(self) -> str:
+        """Human-facing reason when allow() is False, with the cooldown left."""
+        if self.opened_at is None:
+            return "circuit breaker open"
+        remaining = max(0, int(self.reset_after - (self.clock() - self.opened_at)))
+        return f"circuit breaker open for this model (auto-probe in ~{remaining}s)"
+
 
 class BreakerRegistry:
     def __init__(self, threshold: int, reset_after: float) -> None:
@@ -90,7 +97,7 @@ async def call_with_retries(
     attempt = 0
     while True:
         if not breaker.allow():
-            raise ProviderUnavailable("circuit breaker open for this provider", retryable=False)
+            raise ProviderUnavailable(breaker.rejection(), retryable=False)
         try:
             result = await fn()
         except ProviderError as exc:

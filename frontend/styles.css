@@ -2520,6 +2520,11 @@ html, body {
 .run-status-chip.failed { background: var(--danger-bg); color: var(--danger-fg); }
 .run-status-chip.escalated, .run-status-chip.awaiting_user { background: var(--warning-bg); color: var(--warning-fg); }
 .run-status-chip .pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1s infinite; }
+/* Minimal chat run view: stream the answer, no orchestration chrome */
+.run-minimal .run-meta-row, .run-minimal .run-tree,
+.run-minimal .task-list, .run-minimal .decision-line { display: none !important; }
+.run-minimal .bubble-header { opacity: 0.85; }
+.chat-typing { padding: 2px 0 4px; font-size: 13px; }
 .run-cancel-btn {
   margin-left: auto; border: 1px solid var(--border-card); background: var(--bg-surface); color: var(--text-secondary);
   border-radius: 8px; font: 500 12px var(--font-family); padding: 4px 10px; cursor: pointer;
@@ -3101,6 +3106,7 @@ details[open] > .editor-tree-dir::before { content: '▾ '; }
 .project-row:hover .project-add-chat,
 .project-add-chat:focus-visible { opacity: 1; }
 .project-add-chat:hover { background: var(--bg-surface-muted); color: var(--text-primary); }
+.project-add-chat.project-del:hover { background: var(--danger-bg); color: var(--danger); }
 @media (hover: none) {
   .project-add-chat { opacity: 1; }
 }
