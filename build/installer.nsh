@@ -7,6 +7,20 @@
 ; 2. LOCAL_UNSAFE_EXEC lets the bundled coding agents and terminal run without
 ;    Docker; when Docker Desktop is installed the backend prefers containers.
 ; 3. JEVORA_DISABLE_SANDBOX is read by main.js as a belt-and-braces fallback.
+; 4. The app is tray-resident: closing the window leaves the process (and its
+;    bundled backend) running, which locks app files and fails the previous
+;    version's uninstall step with "Failed to uninstall old application files.: 2".
+;    Kill any live instance before the old uninstaller runs and before file copy.
+
+!macro customInit
+  nsExec::ExecToLog 'taskkill /IM "Jevora IDE.exe" /F /T'
+  Sleep 750
+!macroend
+
+!macro customCheckAppInUse
+  nsExec::ExecToLog 'taskkill /IM "Jevora IDE.exe" /F /T'
+  Sleep 750
+!macroend
 
 !macro customInstall
   WriteRegStr HKCU "Environment" "LOCAL_UNSAFE_EXEC" "true"
@@ -21,6 +35,8 @@
 !macroend
 
 !macro customUnInstall
+  nsExec::ExecToLog 'taskkill /IM "Jevora IDE.exe" /F /T'
+  Sleep 500
   DeleteRegValue HKCU "Environment" "LOCAL_UNSAFE_EXEC"
   DeleteRegValue HKCU "Environment" "JEVORA_DISABLE_SANDBOX"
 !macroend
