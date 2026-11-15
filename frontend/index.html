@@ -4,12 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="manifest" href="manifest.webmanifest">
-    <meta name="theme-color" content="#312e81">
+    <meta name="theme-color" content="#1E1E1E">
     <title>Jevora IDE</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    (function () {
+      var t = null;
+      try { t = new URLSearchParams(window.location.search).get('theme') || localStorage.getItem('jevora.theme'); } catch (_) {}
+      var known = ['cursor-dark', 'jetbrains-dark', 'zed-dark', 'github-light'];
+      if (known.indexOf(t) === -1) t = 'cursor-dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
 </head>
 <body>
   <div class="app-container">
@@ -22,6 +32,38 @@
         <div class="sidebar-header-top">
           <span class="sidebar-logo">Jevora IDE</span>
           <div class="sidebar-header-actions">
+            <div class="theme-picker" id="themePicker">
+              <button class="sidebar-icon-btn" id="themePickerBtn" title="Change theme" type="button" aria-haspopup="menu" aria-expanded="false">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+              </button>
+              <div class="theme-menu" id="themeMenu" role="menu" hidden>
+                <div class="theme-menu-title">Theme</div>
+                <button class="theme-menu-item" data-theme-value="cursor-dark" type="button" role="menuitem">
+                  <span class="theme-swatch" style="--swatch-accent:#3794FF;background:#1E1E1E"></span>
+                  <span class="theme-item-name">Cursor Dark</span>
+                  <span class="theme-item-hint">VS Code-style</span>
+                  <span class="theme-check">✓</span>
+                </button>
+                <button class="theme-menu-item" data-theme-value="jetbrains-dark" type="button" role="menuitem">
+                  <span class="theme-swatch" style="--swatch-accent:#3574F0;background:#1E1F22"></span>
+                  <span class="theme-item-name">JetBrains Dark</span>
+                  <span class="theme-item-hint">New UI</span>
+                  <span class="theme-check">✓</span>
+                </button>
+                <button class="theme-menu-item" data-theme-value="zed-dark" type="button" role="menuitem">
+                  <span class="theme-swatch" style="--swatch-accent:#2FBFAD;background:#111113"></span>
+                  <span class="theme-item-name">Graphite Dark</span>
+                  <span class="theme-item-hint">Zed-style</span>
+                  <span class="theme-check">✓</span>
+                </button>
+                <button class="theme-menu-item" data-theme-value="github-light" type="button" role="menuitem">
+                  <span class="theme-swatch" style="--swatch-accent:#0969DA;background:#FFFFFF"></span>
+                  <span class="theme-item-name">GitHub Light</span>
+                  <span class="theme-item-hint">Industry light</span>
+                  <span class="theme-check">✓</span>
+                </button>
+              </div>
+            </div>
             <button class="sidebar-icon-btn" id="sidebarSearchBtn" title="Search history" type="button">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             </button>
@@ -510,9 +552,10 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <script src="app.js?v=10"></script>
+  <script src="theme.js?v=2"></script>
   <script src="shell.js?v=1"></script>
   <script src="panels.js?v=3"></script>
-  <script src="settings.js?v=2"></script>
+  <script src="settings.js?v=3"></script>
   <script src="editor.js?v=1"></script>
 </body>
 </html>

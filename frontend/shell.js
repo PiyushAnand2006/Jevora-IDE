@@ -124,16 +124,17 @@
   css.textContent =
     ".jevora-update-banner{position:fixed;top:12px;right:12px;z-index:10000;display:none;" +
     "align-items:center;gap:10px;padding:10px 14px;border-radius:10px;" +
-    "background:#312e81;color:#eef2ff;font:13px/1.4 system-ui,sans-serif;" +
+    "background:var(--bg-surface,#2D2D2D);color:var(--text-primary,#eef2ff);border:1px solid var(--border-card,#3a3a3a);" +
+    "font:13px/1.4 system-ui,sans-serif;" +
     "box-shadow:0 8px 24px rgba(0,0,0,.35)}" +
     ".jevora-update-banner.visible{display:flex}" +
     ".jevora-update-actions{display:flex;gap:8px}" +
     ".jevora-update-btn{border:0;border-radius:8px;padding:6px 12px;cursor:pointer;" +
-    "background:#6366f1;color:#fff;font:600 12px system-ui,sans-serif}" +
-    ".jevora-update-btn:hover{background:#818cf8}" +
-    ".jevora-update-btn-secondary{background:#4c1d95}" +
+    "background:var(--accent,#3794FF);color:#fff;font:600 12px system-ui,sans-serif}" +
+    ".jevora-update-btn:hover{background:var(--accent-hover,#2A83E8)}" +
+    ".jevora-update-btn-secondary{background:var(--accent-active,#1E78DC)}" +
     ".jevora-backend-pill{position:fixed;bottom:10px;right:12px;z-index:10000;" +
-    "padding:3px 10px;border-radius:999px;background:rgba(49,46,129,.85);color:#c7d2fe;" +
+    "padding:3px 10px;border-radius:999px;background:rgba(28,28,30,.85);color:#9d9d9d;" +
     "font:600 11px system-ui,sans-serif}" +
     ".jevora-backend-pill[data-state='ready']{background:rgba(6,78,59,.85);color:#a7f3d0}" +
     ".jevora-backend-pill[data-state='error']{background:rgba(127,29,29,.9);color:#fecaca}";

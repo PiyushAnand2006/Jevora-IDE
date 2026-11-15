@@ -1,10 +1,11 @@
 /**
  * Jevora IDE — settings & governance UI.
  *
- * Opened from the profile chip: a Settings modal with two tabs —
+ * Opened from the profile chip: a Settings modal with three tabs —
  *   1. Usage & cost: token/cost dashboard (per-day bars, per-model table).
  *   2. Sandbox & VMs: WSL / Docker runtime detection with one-click
  *      download / start / enable actions (agents + terminal isolation).
+ *   3. Appearance: IDE theme cards (same engine as the sidebar picker).
  * Also hosts the per-agent tool-permission editor (checkbox grid).
  */
 (function () {
@@ -66,25 +67,92 @@
       const tabs = el("div", "jv-tabs");
       const usageTab = el("button", "jv-tab active", "Usage & cost");
       const runtimeTab = el("button", "jv-tab", "Sandbox & VMs");
+      const appearanceTab = el("button", "jv-tab", "Appearance");
       tabs.appendChild(usageTab);
       tabs.appendChild(runtimeTab);
+      tabs.appendChild(appearanceTab);
       body.appendChild(tabs);
       const content = el("div", "jv-settings-content");
       body.appendChild(content);
       const show = (which) => {
         usageTab.classList.toggle("active", which === "usage");
         runtimeTab.classList.toggle("active", which === "runtime");
+        appearanceTab.classList.toggle("active", which === "appearance");
         content.innerHTML = "";
         if (which === "usage") renderUsage(content);
+        else if (which === "appearance") renderAppearance(content);
         else renderRuntime(content);
       };
       usageTab.addEventListener("click", () => show("usage"));
       runtimeTab.addEventListener("click", () => show("runtime"));
+      appearanceTab.addEventListener("click", () => show("appearance"));
       show("usage");
     });
   }
   // app.js opens this from the profile-chip menu.
   window.jevoraOpenSettings = openSettings;
+
+  /* ================= Appearance (theme cards) ================= */
+
+  // Single module-level repaint hook so theme changes made anywhere
+  // (sidebar picker, other modal instances) refresh open cards.
+  let repaintAppearance = null;
+  document.addEventListener("jevora:themechange", () => { if (repaintAppearance) repaintAppearance(); });
+
+  function renderAppearance(container) {
+    const themesApi = window.JevoraThemes;
+    const themes = themesApi ? themesApi.list : [];
+
+    container.appendChild(el(
+      "div", "jv-muted",
+      "Pick the IDE look. The theme applies instantly and is remembered across restarts — the palette icon in the sidebar switches it too."
+    ));
+
+    const grid = el("div", "jv-theme-grid");
+
+    const paint = () => {
+      const cur = themesApi ? themesApi.current() : document.documentElement.getAttribute("data-theme");
+      grid.innerHTML = "";
+      themes.forEach((t) => {
+        const card = el("button", "jv-theme-card" + (t.id === cur ? " active" : ""));
+        card.type = "button";
+
+        // Mini IDE mock: sidebar strip + text lines + accent send pill.
+        const pv = el("span", "jv-theme-preview");
+        pv.style.setProperty("--pv-bg", t.palette.bg);
+        pv.style.setProperty("--pv-side", t.palette.side);
+        pv.style.setProperty("--pv-accent", t.palette.accent);
+        pv.style.setProperty("--pv-text", t.palette.text);
+        const side = el("span", "jv-theme-preview-side");
+        const main = el("span", "jv-theme-preview-main");
+        main.appendChild(el("span", "jv-theme-preview-line"));
+        main.appendChild(el("span", "jv-theme-preview-line short"));
+        main.appendChild(el("span", "jv-theme-preview-pill"));
+        pv.appendChild(side);
+        pv.appendChild(main);
+
+        const meta = el("span", "jv-theme-card-meta");
+        meta.appendChild(el("span", "jv-theme-card-name", t.label));
+        meta.appendChild(el("span", "jv-theme-card-hint", t.hint));
+
+        card.appendChild(pv);
+        card.appendChild(meta);
+        card.appendChild(el("span", "jv-theme-card-check", "✓"));
+
+        card.addEventListener("click", () => {
+          if (!themesApi) return;
+          const changed = themesApi.apply(t.id);
+          if (changed === t.id) toast(`Theme set to ${t.label}`);
+        });
+
+        grid.appendChild(card);
+      });
+    };
+
+    paint();
+    repaintAppearance = paint;
+    container.appendChild(grid);
+  }
 
   /* ================= Usage dashboard ================= */
 
@@ -335,28 +403,28 @@
   css.textContent =
     ".jv-modal-wide{width:min(760px,94vw)}" +
     ".jv-tabs{display:flex;gap:6px;margin-bottom:12px}" +
-    ".jv-tab{border:1px solid #e6e6ee;background:#fff;border-radius:999px;padding:6px 14px;" +
-    "font:600 12px system-ui,sans-serif;color:#4b5563;cursor:pointer}" +
-    ".jv-tab.active{background:#312e81;border-color:#312e81;color:#fff}" +
+    ".jv-tab{border:1px solid var(--border-card,#e6e6ee);background:var(--bg-surface,#fff);border-radius:999px;padding:6px 14px;" +
+    "font:600 12px system-ui,sans-serif;color:var(--text-secondary,#4b5563);cursor:pointer}" +
+    ".jv-tab.active{background:var(--accent,#3794FF);border-color:var(--accent,#3794FF);color:#fff}" +
     ".jv-settings-content{min-height:200px}" +
-    ".jv-ok-text{color:#047857;font:600 12px system-ui,sans-serif;align-self:center}" +
+    ".jv-ok-text{color:var(--success-fg,#047857);font:600 12px system-ui,sans-serif;align-self:center}" +
     ".jv-usage-totals{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}" +
-    ".jv-usage-stat{border:1px solid #e6e6ee;border-radius:10px;padding:10px;text-align:center}" +
+    ".jv-usage-stat{border:1px solid var(--border-card,#e6e6ee);border-radius:10px;padding:10px;text-align:center}" +
     ".jv-usage-value{font-size:18px;font-weight:700}" +
-    ".jv-usage-label{font-size:11px;color:#7a7a88;text-transform:uppercase;letter-spacing:.5px}" +
-    ".jv-section-title{font-weight:700;font-size:12px;color:#4b5563;text-transform:uppercase;" +
+    ".jv-usage-label{font-size:11px;color:var(--text-muted,#7a7a88);text-transform:uppercase;letter-spacing:.5px}" +
+    ".jv-section-title{font-weight:700;font-size:12px;color:var(--text-secondary,#4b5563);text-transform:uppercase;" +
     "letter-spacing:.5px;margin:14px 0 6px}" +
     ".jv-chart{display:flex;align-items:flex-end;gap:6px;height:110px;padding:6px 2px 0;" +
-    "border-bottom:1px solid #e6e6ee}" +
+    "border-bottom:1px solid var(--border-card,#e6e6ee)}" +
     ".jv-chart-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}" +
-    ".jv-chart-bar{width:70%;background:linear-gradient(180deg,#6366f1,#312e81);border-radius:4px 4px 0 0;min-height:2px}" +
-    ".jv-chart-label{font-size:9px;color:#7a7a88;margin-top:4px;white-space:nowrap}" +
+    ".jv-chart-bar{width:70%;background:var(--accent,#3794FF);border-radius:4px 4px 0 0;min-height:2px}" +
+    ".jv-chart-label{font-size:9px;color:var(--text-muted,#7a7a88);margin-top:4px;white-space:nowrap}" +
     ".jv-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px}" +
-    ".jv-table th{text-align:left;padding:6px 8px;color:#7a7a88;font-weight:600;border-bottom:1px solid #e6e6ee}" +
-    ".jv-table td{padding:6px 8px;border-bottom:1px solid #f0f0f5}" +
+    ".jv-table th{text-align:left;padding:6px 8px;color:var(--text-muted,#7a7a88);font-weight:600;border-bottom:1px solid var(--border-card,#e6e6ee)}" +
+    ".jv-table td{padding:6px 8px;border-bottom:1px solid var(--border-subtle,#f0f0f5)}" +
     ".jv-perm-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;max-height:48vh;overflow-y:auto}" +
-    ".jv-perm-group{border:1px solid #e6e6ee;border-radius:10px;padding:8px 10px}" +
-    ".jv-perm-group-title{font-weight:700;font-size:11px;text-transform:uppercase;color:#4b5563;margin-bottom:4px}" +
+    ".jv-perm-group{border:1px solid var(--border-card,#e6e6ee);border-radius:10px;padding:8px 10px}" +
+    ".jv-perm-group-title{font-weight:700;font-size:11px;text-transform:uppercase;color:var(--text-secondary,#4b5563);margin-bottom:4px}" +
     ".jv-perm-item{display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0;cursor:pointer}" +
     ".pm-settings{display:block;width:100%;text-align:left;margin-bottom:6px}";
   document.head.appendChild(css);
