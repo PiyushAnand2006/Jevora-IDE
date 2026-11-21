@@ -46,6 +46,10 @@ pip-unpack-*/
 # Browser-control local artifacts
 .pw-browsers/
 .tmptmp/
+# pytest --basetemp scratch dirs (ephemeral per-test data + generated keys)
+.tmpe2e-fix/
+.tmppytest*/
+.tmpe2e*/
 
 # Electron desktop shell
 node_modules/
