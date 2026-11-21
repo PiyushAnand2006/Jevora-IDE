@@ -369,8 +369,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function deleteConversationById(id) {
-    if (conversationBusy()) { showToast('The agent is working — try again when it finishes'); return; }
-    if (!window.confirm('Delete this conversation and its saved runs?')) return;
+    // Deleting is cleanup, not an agent action: always allowed, even while a
+    // run is active — the backend cancels the conversation's runs first, and
+    // resetConversation below disposes any live run views.
+    if (!window.confirm('Delete this conversation and its saved runs? Active runs will be stopped.')) return;
     try {
       await api.del(`/api/conversations/${encodeURIComponent(id)}`);
       if (id === conversationId) resetConversation('Conversation deleted');

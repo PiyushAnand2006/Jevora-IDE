@@ -86,18 +86,44 @@ class RunExecutor:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def recover(self) -> list[str]:
-        """Resubmit runs that were in flight when the process stopped (resume from checkpoint)."""
+        """Resubmit runs that were in flight when the process stopped (resume from checkpoint).
+
+        Runs that have been sitting in a resumable state for too long are failed instead:
+        the app was closed mid-run and never finished them, so resuming a day-old zombie
+        would keep a dead conversation 'live' forever and block its deletion."""
+        from datetime import timedelta, timezone
+
+        from backend.core.ids import utcnow
+        stale_before = utcnow() - timedelta(minutes=40)
         async with self.sessions() as session:
             rows = await session.execute(
-                select(Run.id, Run.user_id, Run.status).where(Run.status.in_(RESUMABLE_STATUSES))
+                select(Run.id, Run.user_id, Run.status, Run.created_at, Run.started_at)
+                .where(Run.status.in_(RESUMABLE_STATUSES))
                 .order_by(Run.created_at))
             items = rows.all()
         resumed: list[str] = []
-        for run_id, user_id, status in items:
+        expired: list[tuple[str, str]] = []
+        for run_id, user_id, status, created_at, started_at in items:
+            stamp = started_at or created_at
+            if stamp is not None and stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if stamp is not None and stamp < stale_before:
+                expired.append((run_id, user_id))
+                continue
             self.submit(run_id, user_id, resume=None if status == "queued" else "restart")
             resumed.append(run_id)
+        for run_id, user_id in expired:
+            recorder = RunRecorder(self.sessions, self.events, run_id, user_id, self.metrics)
+            try:
+                await recorder.cancel_open_calls("run expired")
+                await recorder.set_status("failed", error="the app was closed before this run finished",
+                                          cancelled=True)
+            except Exception:
+                log.exception("could not expire stale run %s", run_id)
         if resumed:
             log.info("recovered %d in-flight runs", len(resumed))
+        if expired:
+            log.info("expired %d stale runs that never finished before the last shutdown", len(expired))
         return resumed
 
     # ------------------------------------------------------------------ submit / cancel
