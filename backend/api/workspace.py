@@ -28,7 +28,6 @@ async def guard_for_id(ctx: AppContext, user, workspace_id: str | None) -> Works
     """Guard rooted at the user's project folder when workspace_id is given."""
     if not workspace_id:
         return guard_for(ctx)
-    from sqlalchemy import select as _select
 
     from backend.db.models import Workspace as _Workspace
 

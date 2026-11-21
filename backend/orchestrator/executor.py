@@ -7,6 +7,7 @@ import contextlib
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
 
 from sqlalchemy import select
@@ -91,7 +92,7 @@ class RunExecutor:
         Runs that have been sitting in a resumable state for too long are failed instead:
         the app was closed mid-run and never finished them, so resuming a day-old zombie
         would keep a dead conversation 'live' forever and block its deletion."""
-        from datetime import timedelta, timezone
+        from datetime import timedelta
 
         from backend.core.ids import utcnow
         stale_before = utcnow() - timedelta(minutes=40)
@@ -106,7 +107,7 @@ class RunExecutor:
         for run_id, user_id, status, created_at, started_at in items:
             stamp = started_at or created_at
             if stamp is not None and stamp.tzinfo is None:
-                stamp = stamp.replace(tzinfo=timezone.utc)
+                stamp = stamp.replace(tzinfo=UTC)
             if stamp is not None and stamp < stale_before:
                 expired.append((run_id, user_id))
                 continue

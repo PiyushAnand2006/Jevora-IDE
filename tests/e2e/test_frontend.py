@@ -105,7 +105,10 @@ def test_frontend_build_run_and_provider_flow(live_app: str, mock_llm_session: M
         page.wait_for_selector("#conversationContext")
         assert "Create calc.py" in page.inner_text("#streamContainer .message-bubble.user")
         assert "2 passed" in page.inner_text("#streamContainer .message-bubble.agent")
-        assert page.locator("#continueConversationBtn").is_enabled()
+        # the inline action strip was replaced by per-row ⋯ menus: the context bar
+        # shows only the title/hint, and the composer stays editable
+        assert page.locator("#conversationContext").is_visible()
+        assert page.locator("#agentInput").is_editable()
         page.click("#vmPill")
         page.wait_for_selector("#vmCreate")
         page.click("#drawerCloseBtn")

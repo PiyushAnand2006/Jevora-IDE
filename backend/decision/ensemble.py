@@ -207,7 +207,7 @@ class DecisionService:
         try:
             return await asyncio.wait_for(self._run_engine(engine, question, evidence),
                                           timeout=self.engine_timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("%s decision timed out after %.1fs (schema=%s); using the faster fallback",
                         engine.name, self.engine_timeout_s, question.type)
             return None

@@ -110,7 +110,7 @@ async def test_all_bindings_fail_raises(harness: AppHarness, mock_llm: MockLLM) 
 
 
 async def test_circuit_breaker_opens(harness: AppHarness, mock_llm: MockLLM) -> None:
-    provider = await add_mock_provider(harness.client, mock_llm)
+    await add_mock_provider(harness.client, mock_llm)
     mock_llm.replies(MockReply(status=503))
     for _ in range(2):
         with pytest.raises(ProviderError):

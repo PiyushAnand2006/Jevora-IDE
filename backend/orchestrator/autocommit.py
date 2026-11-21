@@ -8,6 +8,7 @@ initialises a repository and never stages files outside the run's change set.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,8 @@ async def commit_run_changes(workspace: Path, *, task: str, run_id: str, files: 
     repo = _enclosing_repo(workspace) if enabled else None
     if repo is None or not (files or deleted):
         return None
-    depth = len(workspace.resolve().relative_to(repo).parts) if workspace.resolve() != repo else 0
+    resolved = await asyncio.to_thread(workspace.resolve)
+    depth = len(resolved.relative_to(repo).parts) if resolved != repo else 0
     prefixes = ("../" * depth) if depth else ""
     paths = [prefixes + p for p in [*files, *deleted]]
     code, out = await git_in(repo, "add", "-A", "--", *paths)
