@@ -38,7 +38,6 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
         "provider_models_timeout_s": 2.0,
         "provider_backoff_base_s": 0.01,
         "provider_backoff_cap_s": 0.05,
-        "laya_enabled": False,
         "sandbox_mode": "local",
         "local_unsafe_exec": True,
         "approval_policy": "auto",

@@ -10,13 +10,13 @@ async def test_decision_config_api(harness: AppHarness) -> None:
     client = harness.client
     current = (await client.get("/api/decision/config")).json()
     assert current["config"]["escalation_threshold"] == 0.65
-    assert current["status"]["active"] == "Rules"  # Laya disabled in tests, Jev not configured
-    assert current["status"]["primary"]["mode"] == "shadow"
+    assert current["status"]["active"] == "Rules"  # Jev not configured in tests
+    assert current["status"]["primary"]["mode"] == "acting"
     updated = (await client.put("/api/decision/config", json={"escalation_threshold": 0.7,
-                                                              "thresholds": {"laya": {"verification": 0.9}}})).json()
+                                                              "thresholds": {"jev": {"verification": 0.9}}})).json()
     assert updated["config"]["escalation_threshold"] == 0.7
-    assert updated["config"]["thresholds"]["laya"]["verification"] == 0.9
-    assert updated["config"]["thresholds"]["laya"]["routing"] == 0.8  # untouched keys kept
+    assert updated["config"]["thresholds"]["jev"]["verification"] == 0.9
+    assert updated["config"]["thresholds"]["jev"]["routing"] == 0.7  # untouched keys kept
     assert (await client.put("/api/decision/config", json={"bogus": 1})).status_code == 422
     assert (await client.put("/api/decision/config", json={"escalation_threshold": 3})).status_code == 422
     health = (await client.get("/api/system/health", params={"probe": "false"})).json()
@@ -38,8 +38,8 @@ async def test_label_decisions_and_eval_api(harness: AppHarness, mock_llm: MockL
     listing = (await client.get("/api/decisions", params={"run_id": run_id, "labelled": "true"})).json()
     assert [d["id"] for d in listing["items"]] == [decision["id"]]
     assert (await client.get("/api/decision/eval/latest")).status_code == 404
-    report = (await client.post("/api/decision/eval", json={"engines": ["rules", "laya"]})).json()
+    report = (await client.post("/api/decision/eval", json={"engines": ["rules", "jev"]})).json()
     assert report["report"]["engines"]["rules"]["verification_accuracy"] == 1.0
-    assert report["report"]["engines"]["laya"]["available"] is False
+    assert report["report"]["engines"]["jev"]["available"] is False
     assert report["report"]["dataset_origin"]["logged"] == 1
     assert (await client.get("/api/decision/eval/latest")).status_code == 200

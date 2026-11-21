@@ -179,7 +179,7 @@ async def export_logged(sessions: async_sessionmaker[AsyncSession], path: Path,
     """Export labelled decisions (user labels/escalation answers) as JSONL.
 
     With ``include_engine_choices``, unlabelled *acted* rules decisions are added with the rules choice as a
-    weak label (useful to bootstrap Laya; never used to validate it)."""
+    weak label."""
     async with sessions() as session:
         rows = list(await session.scalars(select(Decision).order_by(Decision.created_at)))
     items: list[DatasetItem] = []
@@ -194,24 +194,3 @@ async def export_logged(sessions: async_sessionmaker[AsyncSession], path: Path,
             items.append(item)
     write_jsonl(items, path)
     return path, len(items)
-
-
-def to_laya_records(items: list[DatasetItem]) -> list[tuple[str, dict[str, Any], dict[str, list[float]]]]:
-    """(state, questions, targets) triples in the format laya's calibration/training code consumes."""
-    from backend.decision.laya_engine import laya_questions, state_text
-
-    out = []
-    for item in items:
-        question = item.question()
-        options = list(question.options)
-        target = [1.0 if o == item.label else 0.0 for o in options]
-        out.append((state_text(question, item.evidence_obj()), laya_questions(question), {"decision": target}))
-    return out
-
-
-def dump_laya_jsonl(items: list[DatasetItem], path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for state, questions, targets in to_laya_records(items):
-            handle.write(json.dumps({"state": state, "questions": questions, "targets": targets}) + "\n")
-    return path

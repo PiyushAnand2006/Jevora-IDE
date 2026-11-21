@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +15,6 @@ from backend.decision.eval.dataset import DatasetItem, export_logged, load_jsonl
 from backend.decision.eval.runner import GateCriteria, run_eval
 from backend.decision.interface import DecisionEngine
 from backend.decision.jev_engine import JevEngine
-from backend.decision.laya_engine import LayaEngine
-from backend.decision.laya_mock import TrainedLayaMock, ZeroShotLayaMock
 from backend.decision.rules_engine import RulesEngine
 from backend.decision.schemas import (
     SCHEMA_CHOICES,
@@ -107,63 +103,41 @@ async def test_rules_routing(task: str, mode: str, expected: str) -> None:
 
 
 # --------------------------------------------------------------------------- interface conformance
-def _engines(client: httpx.AsyncClient) -> list[DecisionEngine]:
-    def jev_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/health"):
-            return httpx.Response(200, json={"ok": True})
-        body = json.loads(request.content)
-        options = list(body["questions"]["decision"]["criteria"])
-        return httpx.Response(200, json={"answers": {"decision": {
-            "choice": options[0], "confidence": 0.8, "probabilities": {o: 0.8 if i == 0 else 0.2 / (len(options) - 1)
-                                                                        for i, o in enumerate(options)}}}})
+def jev_mock(confidence: float = 0.9, health_status: int = 200,
+             pick: Any = None) -> JevEngine:
+    """A hosted-Jev stand-in: healthy, answers with the first option (or ``pick``)."""
 
-    jev = JevEngine("https://jev.test", "key", httpx.AsyncClient(transport=httpx.MockTransport(jev_handler)))
-    return [RulesEngine(), LayaEngine(model_id="mock", backend_factory=TrainedLayaMock),
-            LayaEngine(model_id="mock", backend_factory=ZeroShotLayaMock), jev]
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/health"):
+            return httpx.Response(health_status, json={"ok": True})
+        options = list(json.loads(request.content)["questions"]["decision"]["criteria"])
+        choice = pick(options) if pick is not None else options[0]
+        return httpx.Response(200, json={"answers": {"decision": {"choice": choice, "confidence": confidence}}})
+
+    return JevEngine("https://jev.test", "key", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+
+def _engines() -> list[DecisionEngine]:
+    return [RulesEngine(), jev_mock()]
 
 
 async def test_engines_conform_to_interface() -> None:
-    async with httpx.AsyncClient() as client:
-        evidence = Evidence(items=[result_ev(2), diff_ev(1)])
-        for engine in _engines(client):
-            assert await engine.available()
-            results = [await engine.verify_work(BASE, evidence), await engine.route_model({"task": "build an api"}),
-                       await engine.select_next_action({"mode": "build"}), await engine.assign_agent({"mode": "chat"}),
-                       await engine.decide_retry({"error_kind": "provider_error"}),
-                       await engine.confirm_completion({"mode": "chat", "has_output": True}, evidence)]
-            for result in results:
-                assert result.choice in SCHEMA_CHOICES[result.type]
-                assert 0.0 <= result.confidence <= 1.0 and result.engine == engine.name
-                assert set(result.scores_per_option) <= set(SCHEMA_CHOICES[result.type])
-                assert result.latency_ms >= 0
+    evidence = Evidence(items=[result_ev(2), diff_ev(1)])
+    for engine in _engines():
+        assert await engine.available()
+        results = [await engine.verify_work(BASE, evidence), await engine.route_model({"task": "build an api"}),
+                   await engine.select_next_action({"mode": "build"}), await engine.assign_agent({"mode": "chat"}),
+                   await engine.decide_retry({"error_kind": "provider_error"}),
+                   await engine.confirm_completion({"mode": "chat", "has_output": True}, evidence)]
+        for result in results:
+            assert result.choice in SCHEMA_CHOICES[result.type]
+            assert 0.0 <= result.confidence <= 1.0 and result.engine == engine.name
+            assert set(result.scores_per_option) <= set(SCHEMA_CHOICES[result.type])
+            assert result.latency_ms >= 0
 
 
-async def test_laya_is_lazy_batched_and_handles_missing_weights() -> None:
-    backend = TrainedLayaMock()
-    engine = LayaEngine(model_id="mock", backend_factory=lambda: backend, batch_window_s=0.02)
-    assert not engine.loaded
-    questions = [DecisionQuestion(type="verification", options=list(SCHEMA_CHOICES["verification"]), state=BASE)
-                 for _ in range(5)]
-    await asyncio.gather(*(engine.decide(q, Evidence(items=[result_ev(1), diff_ev(1)])) for q in questions))
-    assert engine.loaded and backend.calls == 1  # five concurrent decisions → one forward pass
-
-    def missing() -> Any:
-        raise FileNotFoundError("model.safetensors not found")
-
-    broken = LayaEngine(model_id="convaiinnovations/laya", backend_factory=missing)
-    assert await broken.available()  # unknown until the first load attempt
-    from backend.decision.interface import EngineUnavailable
-
-    with pytest.raises(EngineUnavailable):
-        await broken.decide(questions[0], None)
-    assert not await broken.available() and "could not load Laya weights" in (broken.describe()["load_error"] or "")
-
-
-def test_laya_unavailable_without_package(monkeypatch) -> None:
-    """When the laya package is missing, the engine reports unavailable (regardless of environment)."""
-    monkeypatch.setitem(sys.modules, "laya", None)  # `import laya` -> ImportError
-    real = LayaEngine(model_id="convaiinnovations/laya")
-    assert asyncio.run(real.available()) is False
+async def test_jev_unavailable_without_config() -> None:
+    assert await JevEngine(None, None, httpx.AsyncClient()).available() is False
 
 
 # --------------------------------------------------------------------------- ensemble policy
@@ -176,9 +150,8 @@ async def sessions(tmp_path: Path) -> Any:
     await engine.dispose()
 
 
-def service(sessions: Any, laya_backend: Any = TrainedLayaMock, jev: JevEngine | None = None) -> DecisionService:
-    return DecisionService(sessions, laya=LayaEngine(model_id="mock", backend_factory=laya_backend),
-                           jev=jev or JevEngine(None, None, httpx.AsyncClient()))
+def service(sessions: Any, jev: JevEngine | None = None) -> DecisionService:
+    return DecisionService(sessions, jev=jev or JevEngine(None, None, httpx.AsyncClient()))
 
 
 async def logged(sessions: Any) -> list[Decision]:
@@ -186,87 +159,75 @@ async def logged(sessions: Any) -> list[Decision]:
         return list(await session.scalars(select(Decision).order_by(Decision.created_at)))
 
 
-async def test_laya_shadow_mode_until_validated(sessions: Any) -> None:
+async def test_jev_unconfigured_falls_back_to_rules(sessions: Any) -> None:
     svc = service(sessions)
     outcome = await svc.verify_work(BASE, Evidence(items=[result_ev(4), diff_ev(2)]))
-    assert outcome.result.engine == "rules" and outcome.result.fallback_used
-    assert outcome.shadow and outcome.shadow[0].engine == "laya" and outcome.shadow[0].shadow
+    assert outcome.result.engine == "rules" and outcome.shadow == []
     rows = await logged(sessions)
-    assert [(r.engine, r.acted, r.shadow) for r in rows] == [("laya", False, True), ("rules", True, False)]
+    assert [(r.engine, r.acted, r.shadow) for r in rows] == [("rules", True, False)]
     assert rows[0].input_state_json["question"]["state"]["iteration"] == 0  # state seen is logged
+    assert await svc.active_engine() == "Rules"
 
-    await svc.save_config({"validated": {"verification": True}})
-    promoted = await svc.verify_work(BASE, Evidence(items=[result_ev(4), diff_ev(2)]))
-    assert promoted.result.engine == "laya" and not promoted.result.fallback_used
-    assert await svc.active_engine() == "Laya"
+
+async def test_jev_primary_acts_when_healthy(sessions: Any) -> None:
+    svc = service(sessions, jev_mock(0.9, pick=lambda options: "confirm_done" if "confirm_done" in options
+                                                                        else options[0]))
+    outcome = await svc.verify_work(BASE, Evidence(items=[result_ev(4), diff_ev(2)]))
+    assert outcome.result.engine == "jev" and outcome.result.choice == "confirm_done"
+    assert not outcome.result.fallback_used and outcome.shadow == []
+    assert await svc.active_engine() == "Jev"
 
 
 async def test_disagreement_on_confirm_escalates(sessions: Any) -> None:
-    class AlwaysConfirm(TrainedLayaMock):
-        def predict_batch(self, states: list[str], questions: dict[str, Any]) -> list[dict[str, Any]]:
-            options = list(questions["decision"]["criteria"])
-            choice = "confirm_done" if "confirm_done" in options else options[0]
-            from backend.decision.laya_mock import _answer
-
-            return [_answer(options, choice, 0.97) for _ in states]
-
-    svc = service(sessions, AlwaysConfirm)
-    await svc.save_config({"validated": {"verification": True}})
-    # Tests FAIL but the model confirms → never confirmed: escalate.
+    # Tests FAIL but Jev confirms → never confirmed: escalate.
+    svc = service(sessions, jev_mock(0.97, pick=lambda options: "confirm_done" if "confirm_done" in options
+                                                                          else options[0]))
     outcome = await svc.verify_work(BASE, Evidence(items=[result_ev(1, failed=3), diff_ev(1)]))
     assert outcome.result.choice == "escalate" and "disagree" in outcome.result.reason
 
 
 async def test_low_confidence_and_high_risk(sessions: Any) -> None:
-    svc = service(sessions)
+    svc = service(sessions, jev_mock(0.8, pick=lambda options: options[0]))
     await svc.save_config({"escalation_threshold": 0.95})
     outcome = await svc.verify_work(BASE, Evidence(items=[result_ev(3), diff_ev(1)]))
     assert outcome.result.choice == "escalate" and "below escalation threshold" in outcome.result.reason
-    await svc.save_config({"escalation_threshold": 0.65, "validated": {"verification": True}})
+    await svc.save_config({"escalation_threshold": 0.65})
     risky = await svc.verify_work({**BASE, "high_risk": True}, Evidence(items=[result_ev(3), diff_ev(1)]))
     assert risky.result.engine == "rules" and risky.shadow[0].reason.endswith("high-risk action")
 
 
-async def test_jev_fallback_then_rules(sessions: Any) -> None:
-    calls: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request.url.path)
-        if request.url.path.endswith("/health"):
-            return httpx.Response(200)
-        options = list(json.loads(request.content)["questions"]["decision"]["criteria"])
-        choice = "confirm_done" if "confirm_done" in options else options[0]
-        return httpx.Response(200, json={"answers": {"decision": {"choice": choice, "confidence": 0.9}}})
-
-    jev = JevEngine("https://jev.test", "k", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    svc = service(sessions, laya_backend=lambda: (_ for _ in ()).throw(FileNotFoundError("no weights")), jev=jev)
+async def test_jev_down_falls_back_to_rules(sessions: Any) -> None:
+    svc = service(sessions, jev_mock(health_status=503))
     outcome = await svc.verify_work(BASE, Evidence(items=[result_ev(3), diff_ev(1)]))
-    assert outcome.result.engine == "jev" and outcome.result.choice == "confirm_done"
-    assert await svc.active_engine() == "Jev"
+    assert outcome.result.engine == "rules"
+    assert await svc.active_engine() == "Rules"
 
-    def down(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(503)
 
-    svc.jev = JevEngine("https://jev.test", "k", httpx.AsyncClient(transport=httpx.MockTransport(down)))
+async def test_slow_engine_is_cancelled_at_the_latency_cap(sessions: Any) -> None:
+    class SlowJev(JevEngine):
+        async def decide(self, question: DecisionQuestion, evidence: Evidence | None) -> Any:
+            await asyncio.sleep(10)
+            raise AssertionError("must be cancelled by the latency cap")
+
+    svc = DecisionService(sessions, jev=SlowJev("https://jev.test", "k", httpx.AsyncClient()),
+                          rules=RulesEngine(), engine_timeout_s=0.2)
     outcome = await svc.verify_work(BASE, Evidence(items=[result_ev(3), diff_ev(1)]))
     assert outcome.result.engine == "rules"
 
 
-# --------------------------------------------------------------------------- eval + promotion gate
-async def test_eval_gate_promotes_only_good_engines(sessions: Any) -> None:
+# --------------------------------------------------------------------------- eval
+async def test_eval_reports_engines(sessions: Any) -> None:
     items = seed_dataset()
-    good = service(sessions, TrainedLayaMock)
-    report = await run_eval(good, items, ["rules", "laya"], GateCriteria(min_items=25), promote=True)
-    laya = report.engines["laya"]
-    assert laya.verification_accuracy == 1.0 and laya.incorrect_completion_detection == 1.0
-    assert laya.reliability == 1.0 and laya.latency_p95_ms > 0
-    assert set(report.promoted) == {"verification", "routing"} and good.config.validated["verification"]
-
-    bad = service(sessions, ZeroShotLayaMock)
-    await bad.save_config({"validated": {"verification": False, "routing": False}})
-    report = await run_eval(bad, items, ["laya"], GateCriteria(min_items=25), promote=True)
-    assert report.promoted == [] and not bad.config.validated["verification"]
-    assert (report.engines["laya"].verification_accuracy or 0) < 0.85
+    svc = service(sessions, jev_mock(0.9, pick=lambda options: "confirm_done" if "confirm_done" in options
+                                                                          else options[0]))
+    report = await run_eval(svc, items, ["rules", "jev"], GateCriteria(min_items=25))
+    assert report.engines["rules"].verification_accuracy == 1.0  # deterministic rules match every label
+    jev_report = report.engines["jev"]
+    assert jev_report.available and jev_report.error is None and jev_report.n > 0
+    # The mock answers blindly, so accuracies vary — what matters is that every
+    # verdict was valid, typed and fast enough to be counted.
+    assert jev_report.reliability == 1.0 and jev_report.failures == 0 and jev_report.latency_p95_ms > 0
+    assert jev_report.verification_accuracy is not None
 
 
 async def test_export_labelled_decisions(sessions: Any, tmp_path: Path) -> None:

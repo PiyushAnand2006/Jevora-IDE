@@ -115,7 +115,11 @@ async def test_circuit_breaker_opens(harness: AppHarness, mock_llm: MockLLM) -> 
     for _ in range(2):
         with pytest.raises(ProviderError):
             await harness.ctx.router.chat(_meta(harness), [ChatMessage(role="user", content="hi")])
-    assert harness.ctx.router.breakers.get(provider["id"]).state == "open"
+    # Breakers are per provider+model binding: every binding that hit the
+    # failing provider opened, and none of the registry keys is provider-only.
+    states = harness.ctx.router.breakers.snapshot()
+    assert states and all(state == "open" for state in states.values())
+    assert all(":" in key for key in states)
 
 
 async def test_tool_calls_normalised(harness: AppHarness, mock_llm: MockLLM) -> None:

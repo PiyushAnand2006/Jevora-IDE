@@ -1,4 +1,4 @@
-"""Evaluate decision engines on the project's own schemas and gate Laya's promotion.
+"""Evaluate decision engines on the project's own decision schemas.
 
 Metrics per engine: decision latency (mean/p50/p95), verification accuracy, routing quality
 (accuracy), incorrect-completion detection (share of not-done cases that were NOT confirmed),
@@ -141,9 +141,9 @@ def gate(report: EngineReport, criteria: GateCriteria) -> dict[str, bool]:
 
 
 async def run_eval(service: DecisionService, items: list[DatasetItem], engines: list[str] | None = None,
-                   criteria: GateCriteria | None = None, promote: bool = False) -> EvalReport:
+                   criteria: GateCriteria | None = None) -> EvalReport:
     criteria = criteria or GateCriteria()
-    names = engines or ["rules", "laya", "jev"]
+    names = engines or ["rules", "jev"]
     reports: dict[str, EngineReport] = {}
     for name in names:
         engine = service.engine(name)
@@ -155,11 +155,6 @@ async def run_eval(service: DecisionService, items: list[DatasetItem], engines: 
     report = EvalReport(created_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"), dataset_size=len(items),
                         dataset_origin=origins, criteria=criteria, engines=reports,
                         gate={name: gate(r, criteria) for name, r in reports.items()})
-    if promote and "laya" in reports:
-        laya_gate = report.gate["laya"]
-        validated = {schema: ok for schema, ok in laya_gate.items()}
-        await service.save_config({"validated": validated})
-        report.promoted = [schema for schema, ok in validated.items() if ok]
     return report
 
 
@@ -179,12 +174,6 @@ def render_markdown(report: EvalReport) -> str:
         lines.append(f"| {name} | {'yes' if r.available else 'no'} | {fmt(r.verification_accuracy)} | "
                      f"{fmt(r.incorrect_completion_detection)} | {fmt(r.false_confirm_rate)} | "
                      f"{fmt(r.routing_accuracy)} | {fmt(r.reliability)} | {r.latency_p50_ms} | {r.latency_p95_ms} |")
-    lines += ["", "## Promotion gate", "", f"Criteria: {report.criteria.model_dump()}", ""]
-    for name, schemas in report.gate.items():
-        ok = [s for s, v in schemas.items() if v]
-        lines.append(f"- **{name}**: validated for {', '.join(ok) if ok else 'nothing'}")
-    if report.promoted:
-        lines.append(f"\nLaya promoted (validated=true) for: {', '.join(report.promoted)}")
     for name, r in report.engines.items():
         if r.error:
             lines.append(f"\n> {name}: {r.error}")

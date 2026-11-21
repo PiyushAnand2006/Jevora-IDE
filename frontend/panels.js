@@ -1,6 +1,6 @@
 /**
  * Jevora IDE — workspace panels (Library, Scheduled, Projects), run timeline,
- * diff viewer, Monaco editor, MCP catalog, agent export/import, Laya labels.
+ * diff viewer, Monaco editor, MCP catalog, agent export/import, decision labels.
  *
  * Loaded after app.js; reuses the global `api` helper and `$` from app.js.
  * Everything degrades gracefully when endpoints are unavailable.
@@ -259,7 +259,7 @@
     if (!decisionId) return;
     try {
       await tryApi("POST", `/api/decisions/${decisionId}/label`, { label });
-      toast("Feedback recorded — feeds Laya fine-tuning");
+      toast("Feedback recorded");
     } catch (e) { toast("Label failed: " + e.message); }
   }
 

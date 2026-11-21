@@ -86,13 +86,19 @@ async def finalize(o: Orchestrator, state: GraphState) -> dict[str, Any]:
     rc = ctx_for(o, state)
     status = _final_status(state)
     evidence = evidence_of(state)
-    diff, stats, _ = diff_evidence(rc)
+    # The post-run diff costs a full workspace re-walk; skip it for runs whose
+    # tools reported no file changes (the common case for plain chats).
+    if state.get("files_changed"):
+        diff, stats, _ = diff_evidence(rc)
+    else:
+        diff, stats = "", {"files_changed": 0, "additions": 0, "deletions": 0, "files": [], "deleted_files": []}
     if stats.get("files_changed"):
         await rc.recorder.upsert_diff(diff, {k: v for k, v in stats.items() if k != "truncated"})
     flags = state.get("flags", {})
     verification = state.get("verification") or {}
     produced = (state.get("worker_output") or state.get("plan") or "").strip()
-    if not verification and (state.get("worker_status") or produced) and not state.get("error"):
+    if (not verification and (state.get("worker_status") or produced) and not state.get("error")
+            and state["mode"] != "chat"):
         # No verification loop ran (plugin off, chat, or a command): still log a completion verdict.
         outcome = await o.app.decisions.confirm_completion(
             {"mode": "chat" if state.get("command") in ("/plan", "/review", "/run") else state["mode"],

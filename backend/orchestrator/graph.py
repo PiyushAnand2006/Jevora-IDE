@@ -94,6 +94,8 @@ def route_build_worker(state: GraphState) -> str:
 
 
 def route_chat(state: GraphState) -> str:
+    if state["mode"] == "chat":
+        return "finalize"  # plain chats are normal conversations: stream the answer, no verification
     if state.get("files_changed") and state.get("flags", {}).get("decision_verification", True):
         return "tester"
     return "finalize"
@@ -106,6 +108,8 @@ def route_tester(state: GraphState) -> str:
 def route_critic(state: GraphState) -> str:
     if state.get("command") == "/review":
         return "finalize"
+    if state["mode"] != "build" and not state.get("command"):
+        return "finalize"  # plain chats: no verification
     return "verifier" if state.get("flags", {}).get("decision_verification", True) else "finalize"
 
 
@@ -224,11 +228,16 @@ class Orchestrator:
         snapshot_path = self._snapshot_path(run.id)
         snapshot: WorkspaceSnapshot | None = None if fresh else await asyncio.to_thread(load_snapshot, snapshot_path)
         if snapshot is None:
-            snapshot = await asyncio.to_thread(WorkspaceSnapshot.capture, workspace)
+            # Plain chats only need change detection (size/mtime) before the
+            # first token — skip the read+hash+decode of every workspace file.
+            snapshot = await asyncio.to_thread(WorkspaceSnapshot.capture, workspace,
+                                               with_content=(run.mode != "chat"))
             await asyncio.to_thread(save_snapshot, snapshot, snapshot_path)
         flags = await self.app.plugins.flags(run.user_id)
 
         async def route_fn(task: str, agent_name: str) -> str:
+            if run.mode == "chat":
+                return "fast_classification"  # plain chats never pay a routing decision
             outcome = await self.app.decisions.route_model({"task": task[:2000], "mode": run.mode,
                                                             "agent": agent_name}, recorder=handle.recorder)
             return outcome.result.choice

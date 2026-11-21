@@ -184,7 +184,9 @@ async def test_third_party_plugin_tools_and_hooks(plugin_app: AppHarness, mock_l
     assert run["final_output"] == "hello, Ada!"
     events = sys.modules["jevora_plugin_hello_plugin"].EVENTS
     assert f"before_run:{run_id}" in events and "after_node:chat" in events
-    assert any(e.startswith("decision:completion:") for e in events)
+    # Plain chats are normal conversations: no decision-engine verdicts, so the
+    # on_decision hook must not fire for them.
+    assert not any(e.startswith("decision:") for e in events)
     await client.patch("/api/plugins/hello_plugin", json={"enabled": False})
     events.clear()
     run_id = (await client.post("/api/runs", json={"text": "greet again", "mode": "chat"})).json()["id"]

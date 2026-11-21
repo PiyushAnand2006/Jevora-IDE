@@ -441,9 +441,11 @@ def _preview_args(args: dict[str, Any]) -> dict[str, Any]:
 
 async def _subagent_verdict(ctx: ToolContext, rc: RunContext, child: AgentConfig,
                             result: AgentResult) -> str:
-    """Governance: Jevora/Laya judges the subagent's work on its evidence and the
+    """Governance: Jevora judges the subagent's work on its evidence and the
     verdict is returned to the assigning agent, which can re-dispatch with the
     feedback until the result satisfies the task (the LangGraph loop bounds it)."""
+    if rc.mode == "chat":
+        return ""  # plain chats: no governance verdicts
     try:
         from backend.decision.schemas import Evidence
         from backend.orchestrator.nodes.verifier import feedback_from

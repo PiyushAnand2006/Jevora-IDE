@@ -95,6 +95,12 @@ async def classify(o: Orchestrator, state: GraphState) -> dict[str, Any]:
             await rc.recorder.finish_call(call_id, status="failed", error=f"triage fell back to heuristics: {exc}")
 
     attachments = await load_attachments(o, state)
+    if mode == "chat" and not command:
+        # Plain chats are normal conversations: no routing/assignment decisions,
+        # a fixed fast category, and no test scan (nothing here needs tests).
+        updates.update({"spec": spec, "category": "fast_classification", "assignee": "chat",
+                        "worker_node": "chat", "requires_tests": False, "requires_changes": False})
+        return updates
     route = await o.app.decisions.route_model(
         {**spec, "task": task[:2000], "mode": mode, "command": command,
          "has_images": any(a["kind"] == "image" for a in attachments)}, recorder=rc.recorder)

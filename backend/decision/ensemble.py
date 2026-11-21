@@ -2,10 +2,10 @@
 
 Policy, per decision:
 1. The RulesEngine always runs (deterministic safety net, cold-start engine).
-2. The primary (Laya) runs when enabled. It may *act* only if its schema is ``validated``, its
+2. The primary (Jev) runs when available. It may *act* only if its schema is ``validated``, its
    confidence clears its per-schema threshold, and the decision is not high-risk. Otherwise its
    verdict is logged in **shadow** mode and not acted on.
-3. Otherwise the fallback chain decides: Jev (if configured and confident) → Rules.
+3. Otherwise the fallback chain decides: Rules.
 4. Verification safety: if the acting engine is not Rules and it disagrees with Rules about
    ``confirm_done`` → escalate. A model can never confirm work that the evidence rules reject.
 5. If the acting confidence is below the user-escalation threshold → escalate (for schemas that
@@ -15,6 +15,7 @@ Every engine verdict (acted or shadow) is logged with the state it saw, for eval
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -28,7 +29,6 @@ from backend.core.metrics import Metrics
 from backend.db.models import Decision, SettingKV, UserSetting
 from backend.decision.interface import DecisionEngine, EngineUnavailable
 from backend.decision.jev_engine import JevEngine
-from backend.decision.laya_engine import LayaEngine
 from backend.decision.rules_engine import RulesEngine, distribution
 from backend.decision.schemas import (
     ASSIGNMENT_CHOICES,
@@ -58,15 +58,32 @@ def _per_schema(value: float) -> dict[str, float]:
 class DecisionConfig(BaseModel):
     escalation_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
     thresholds: dict[str, dict[str, float]] = Field(default_factory=lambda: {
-        "laya": _per_schema(0.80), "jev": _per_schema(0.70), "rules": _per_schema(0.0)})
-    validated: dict[str, bool] = Field(default_factory=lambda: dict.fromkeys(SCHEMAS, False))
+        "jev": _per_schema(0.70), "rules": _per_schema(0.0)})
+    validated: dict[str, bool] = Field(default_factory=lambda: dict.fromkeys(SCHEMAS, True))
     shadow_enabled: bool = True
     escalate_on_disagreement: bool = True
-    primary: str = "laya"
-    fallbacks: list[str] = Field(default_factory=lambda: ["jev", "rules"])
+    primary: str = "jev"
+    fallbacks: list[str] = Field(default_factory=lambda: ["rules"])
 
     def threshold(self, engine: str, schema: str) -> float:
         return self.thresholds.get(engine, {}).get(schema, 0.0)
+
+
+def _normalize_stored_config(data: Any) -> Any:
+    """Migrate persisted configs away from the removed Laya engine."""
+    if not isinstance(data, dict):
+        return data
+    data = dict(data)
+    if data.get("primary") == "laya":
+        data["primary"] = "jev"
+    fallbacks = [f for f in (data.get("fallbacks") or []) if f != "laya"]
+    if "rules" not in fallbacks:
+        fallbacks.append("rules")
+    data["fallbacks"] = fallbacks
+    thresholds = dict(data.get("thresholds") or {})
+    thresholds.pop("laya", None)
+    data["thresholds"] = thresholds
+    return data
 
 
 class DecisionOutcome(BaseModel):
@@ -77,13 +94,13 @@ class DecisionOutcome(BaseModel):
 
 
 class DecisionService:
-    def __init__(self, sessions: async_sessionmaker[AsyncSession], *, laya: LayaEngine, jev: JevEngine,
+    def __init__(self, sessions: async_sessionmaker[AsyncSession], *, jev: JevEngine,
                  rules: RulesEngine | None = None, metrics: Metrics | None = None,
-                 default_threshold: float = 0.65) -> None:
+                 default_threshold: float = 0.65, engine_timeout_s: float = 2.5) -> None:
         self.sessions = sessions
         self.metrics = metrics
+        self.engine_timeout_s = float(engine_timeout_s)
         self.rules = rules or RulesEngine()
-        self.laya = laya
         self.jev = jev
         self.config = DecisionConfig(escalation_threshold=default_threshold)
         self._configs: dict[str, DecisionConfig] = {}
@@ -101,7 +118,7 @@ class DecisionService:
         base = self.config if user_id is None else DecisionConfig(escalation_threshold=self.config.escalation_threshold)
         if row is not None and isinstance(row.value, dict):
             merged = base.model_dump()
-            merged.update(row.value)
+            merged.update(_normalize_stored_config(row.value))
             base = DecisionConfig.model_validate(merged)
         if user_id is None:
             self.config = base
@@ -126,7 +143,7 @@ class DecisionService:
                 merged[key] = inner
             else:
                 merged[key] = value
-        config = DecisionConfig.model_validate(merged)
+        config = DecisionConfig.model_validate(_normalize_stored_config(merged))
         if user_id is None:
             self.config = config
         else:
@@ -147,28 +164,24 @@ class DecisionService:
         return config
 
     def engine(self, name: str) -> DecisionEngine | None:
-        return {"laya": self.laya, "jev": self.jev, "rules": self.rules}.get(name)
+        return {"jev": self.jev, "rules": self.rules}.get(name)
 
     async def active_engine(self, user_id: str | None = None) -> str:
         """The engine that currently acts on verification decisions (shown in the UI)."""
         cfg = self.config if user_id is None else await self.get_config(user_id)
-        if await self.laya.available() and cfg.validated.get("verification"):
-            return "Laya"
-        if await self.jev.available():
+        if await self.jev.available() and cfg.validated.get("verification"):
             return "Jev"
         return "Rules"
 
     async def status(self, user_id: str | None = None) -> dict[str, Any]:
         cfg = self.config if user_id is None else await self.get_config(user_id)
-        laya_ok = await self.laya.available()
         return {
             "ok": True,
             "active": await self.active_engine(user_id),
-            "primary": {**self.laya.describe(), "available": laya_ok,
+            "primary": {**self.jev.describe(), "available": await self.jev.available(),
                         "validated": cfg.validated, "mode": "acting" if any(cfg.validated.values())
                         else "shadow"},
-            "fallback": {**self.jev.describe(), "available": await self.jev.available()},
-            "rules": {**self.rules.describe(), "available": True},
+            "fallback": {**self.rules.describe(), "available": True},
             "escalation_threshold": cfg.escalation_threshold,
         }
 
@@ -186,6 +199,19 @@ class DecisionService:
             log.exception("%s decision failed", engine.name)
             return None
 
+    async def _timed_engine(self, engine: DecisionEngine, question: DecisionQuestion,
+                            evidence: Evidence | None) -> DecisionResult | None:
+        """Run an engine under a hard latency cap. Engines are advisory: the
+        rules result (computed first) always covers a timeout, so a slow hosted
+        Jev call can never stall a user message."""
+        try:
+            return await asyncio.wait_for(self._run_engine(engine, question, evidence),
+                                          timeout=self.engine_timeout_s)
+        except asyncio.TimeoutError:
+            log.warning("%s decision timed out after %.1fs (schema=%s); using the faster fallback",
+                        engine.name, self.engine_timeout_s, question.type)
+            return None
+
     async def decide(self, question: DecisionQuestion, evidence: Evidence | None = None, *,
                      recorder: RunRecorder | None = None, call_id: str | None = None) -> DecisionOutcome:
         started = time.perf_counter()
@@ -198,7 +224,7 @@ class DecisionService:
 
         primary = self.engine(cfg.primary)
         if primary is not None and primary is not self.rules:
-            primary_result = await self._run_engine(primary, question, evidence)
+            primary_result = await self._timed_engine(primary, question, evidence)
             if primary_result is not None:
                 trusted = (cfg.validated.get(schema, False) and not question.high_risk
                            and primary_result.confidence >= cfg.threshold(primary.name, schema))
@@ -220,7 +246,7 @@ class DecisionService:
                 if engine is self.rules:
                     acting = rules_result
                     break
-                result = await self._run_engine(engine, question, evidence)
+                result = await self._timed_engine(engine, question, evidence)
                 if result is not None and result.confidence >= cfg.threshold(engine.name, schema):
                     acting = result
                     break

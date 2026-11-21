@@ -31,9 +31,12 @@ async def conversation_history(o: Orchestrator, conversation_id: str | None, use
         return []
     async with o.app.sessions() as session:
         await owned_conversation(session, user_id, conversation_id, "chat")
-        rows = list(await session.scalars(select(Message).where(
+        # Load only the newest messages: the budget compaction below would trim
+        # everything older anyway, so there is no point fetching unlimited rows.
+        newest = (await session.scalars(select(Message).where(
             Message.conversation_id == conversation_id, or_(Message.run_id.is_(None), Message.run_id != run_id))
-            .order_by(Message.created_at, Message.id)))
+            .order_by(Message.created_at.desc(), Message.id.desc()).limit(400))).all()
+        rows = list(reversed(newest))
     messages = [ChatMessage(role="assistant" if m.role == "assistant" else "user", content=m.content) for m in rows]
     # context compaction: keep the most recent messages within the prompt budget
     # so marathon conversations don't crowd out the system prompt and tools.

@@ -53,8 +53,8 @@ async def put_decision_config(body: dict[str, Any], user: CurrentUser, ctx: Ctx)
     unknown = set(body) - allowed
     if unknown:
         raise AppError(f"unknown config keys: {sorted(unknown)}", code="invalid_config", status_code=422)
-    if "primary" in body and body["primary"] not in ("laya", "jev", "rules"):
-        raise AppError("primary must be laya, jev or rules", code="invalid_config", status_code=422)
+    if "primary" in body and body["primary"] not in ("jev", "rules"):
+        raise AppError("primary must be jev or rules", code="invalid_config", status_code=422)
     try:
         config = await ctx.decisions.save_config(body, user.id)
     except ValueError as exc:
@@ -85,21 +85,20 @@ async def list_decisions(user: CurrentUser, ctx: Ctx, run_id: str | None = None,
 
 
 class EvalBody(BaseModel):
-    engines: list[str] = Field(default_factory=lambda: ["rules", "laya", "jev"])
-    promote: bool = False
+    engines: list[str] = Field(default_factory=lambda: ["rules", "jev"])
     include_seed: bool = True
 
 
 @router.post("/api/decision/eval")
 async def run_decision_eval(body: EvalBody, user: CurrentUser, ctx: Ctx) -> dict[str, Any]:
-    """Evaluate engines on seed + labelled decisions; optionally apply Laya's promotion gate."""
+    """Evaluate engines on seed + labelled decisions."""
     from backend.decision.eval.dataset import export_logged, load_jsonl, seed_dataset
     from backend.decision.eval.runner import render_markdown, run_eval
 
     datasets = ctx.settings.data_dir / "datasets"
     path, _ = await export_logged(ctx.sessions, datasets / "labelled-api.jsonl")
     items = (seed_dataset() if body.include_seed else []) + load_jsonl(path)
-    report = await run_eval(ctx.decisions, items, body.engines, promote=body.promote)
+    report = await run_eval(ctx.decisions, items, body.engines)
     out = ctx.settings.data_dir / "eval"
     out.mkdir(parents=True, exist_ok=True)
     (out / "latest.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")

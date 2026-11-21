@@ -27,7 +27,6 @@ from backend.core.users import ensure_local_user
 from backend.db.session import make_engine, make_sessionmaker, run_migrations
 from backend.decision.ensemble import DecisionService
 from backend.decision.jev_engine import JevEngine
-from backend.decision.laya_engine import LayaEngine
 from backend.decision.schemas import configure_evidence_key
 from backend.mcp.manager import MCPManager
 from backend.orchestrator.approvals import ApprovalBroker
@@ -121,14 +120,6 @@ class AppContext:
         await self.executor.start()
         await self.executor.recover()
         await self.scheduler.start()
-        if self.settings.laya_enabled and self.settings.laya_preload:
-            self.extras["laya_preload"] = asyncio.create_task(self._preload_laya())
-
-    async def _preload_laya(self) -> None:
-        try:
-            await self.decisions.laya.load()
-        except Exception as exc:  # weights missing → engine stays unavailable
-            self.extras["laya_preload_error"] = str(exc)
 
     async def aclose(self) -> None:
         await self.scheduler.stop()
@@ -224,12 +215,10 @@ async def build_context(settings: Settings, http_transport: httpx.AsyncBaseTrans
         tools=build_registry(),
         decisions=DecisionService(
             sessions,
-            laya=LayaEngine(model_id=settings.laya_model_id, device=settings.laya_device,
-                            enabled=settings.laya_enabled,
-                            calibration_path=settings.data_dir / "laya_calibration.json"),
             jev=JevEngine(settings.jev_api_url,
                           settings.jev_api_key.get_secret_value() if settings.jev_api_key else None, http),
-            metrics=metrics, default_threshold=settings.escalation_threshold),
+            metrics=metrics, default_threshold=settings.escalation_threshold,
+            engine_timeout_s=settings.decision_engine_timeout_s),
         web_search=WebSearchService(settings, http),
     )
 

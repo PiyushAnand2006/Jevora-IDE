@@ -129,10 +129,7 @@ class Settings(BaseSettings):
     approval_timeout_s: int = 600
 
     # ---- decision layer -------------------------------------------------------------
-    laya_enabled: bool = True
-    laya_model_id: str = "convaiinnovations/laya"
-    laya_device: str | None = None
-    laya_preload: bool = False
+    decision_engine_timeout_s: float = 2.5
     jev_api_url: str | None = None
     jev_api_key: SecretStr | None = None
 

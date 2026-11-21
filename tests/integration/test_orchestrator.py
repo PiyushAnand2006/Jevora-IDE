@@ -157,7 +157,7 @@ async def test_chat_mode_streams_and_remembers_conversation(harness: AppHarness,
                                                            "conversation_id": run["conversation_id"]})).json()
     run2 = await wait_terminal(harness.client, second["id"])
     assert run2["final_output"] == "Reply number 2 about your project."
-    assert run2["decisions"][-1]["type"] == "completion"
+    assert run2["decisions"] == []  # plain chats are normal conversations: zero decision-engine calls
     assert not any(r.role == "router" for r in await calls(harness, second["id"]))  # chat skips triage
 
 

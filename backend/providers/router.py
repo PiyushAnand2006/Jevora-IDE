@@ -128,6 +128,7 @@ class ProviderRouter:
         self.metrics = metrics
         self.breakers = BreakerRegistry(settings.circuit_breaker_threshold, settings.circuit_breaker_reset_s)
         self._semaphores: dict[str, asyncio.Semaphore] = {}
+        self._health_cache: dict[str, tuple[float, dict[tuple[str, str], dict[str, Any]]]] = {}
 
     # ------------------------------------------------------------------ mapping
     async def _candidates(self, user_id: str) -> list[tuple[Provider, ModelBinding]]:
@@ -142,10 +143,14 @@ class ProviderRouter:
     async def _health_stats(self, user_id: str) -> dict[tuple[str, str], dict[str, Any]]:
         """Recent per-(provider, model) outcomes from llm_calls, so routing prefers
         models that actually work on this account instead of re-trying ones that
-        404 or hang."""
+        404 or hang. Cached briefly: resolve() consults it several times per run
+        and the underlying scan reads every LLMCall row from the last 48h."""
         from datetime import timedelta
 
         from backend.core.ids import utcnow
+        stamp, cached = self._health_cache.get(user_id, (0.0, None))
+        if cached is not None and time.monotonic() - stamp < 30:
+            return cached
         since = utcnow() - timedelta(hours=48)
         stats: dict[tuple[str, str], dict[str, Any]] = {}
         async with self.sessions() as session:
@@ -162,6 +167,7 @@ class ProviderRouter:
                 st["err"] += 1
             st["last_status"] = status
             st["last_error"] = (error or "")[:200]
+        self._health_cache[user_id] = (time.monotonic(), stats)
         return stats
 
     async def default_mapping(self, user_id: str) -> dict[str, list[Binding]]:

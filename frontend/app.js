@@ -311,9 +311,18 @@ document.addEventListener('DOMContentLoaded', () => {
     applyModelFor(conversationId); // switch the composer to this chat's model
   }
 
+  // ZCode-style composer: while a run streams, the send button becomes Stop.
+  const SEND_ICON = sendBtn.innerHTML;
+  const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>';
+
   function updateConversationComposer() {
-    const busy = conversationLoading || runStarting || [...activeRunViews].some((view) => !view.finished);
-    sendBtn.disabled = busy;
+    const activeViews = [...activeRunViews].filter((view) => !view.finished);
+    const busy = conversationLoading || runStarting || activeViews.length > 0;
+    const stopping = !conversationLoading && !runStarting && activeViews.length > 0;
+    sendBtn.classList.toggle('stop-btn', stopping);
+    sendBtn.innerHTML = stopping ? STOP_ICON : SEND_ICON;
+    sendBtn.title = stopping ? 'Stop generating' : 'Send';
+    sendBtn.disabled = busy && !stopping;
     agentInput.disabled = conversationLoading;
     agentInput.placeholder = conversationLoading ? 'Loading conversation…' : busy ? 'The agent is working…' : conversationId ? 'Continue this conversation…' : 'How can I help you today?';
     const context = $('conversationContext');
@@ -954,7 +963,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function handleSendMessage() {
-    if (conversationLoading || runStarting || [...activeRunViews].some((view) => !view.finished)) return;
+    // While a run streams, the composer button acts as Stop (ZCode-style).
+    const activeViews = [...activeRunViews].filter((view) => !view.finished);
+    if (!conversationLoading && !runStarting && activeViews.length) {
+      activeViews.forEach((view) => view.cancel());
+      return;
+    }
+    if (conversationLoading || runStarting || activeViews.length) return;
     const text = agentInput.value.trim();
     if (activeAttachments.some((a) => a.uploading)) { showToast('Wait for uploads to finish'); return; }
     if (!text && activeAttachments.length === 0) return;
@@ -1059,7 +1074,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tl.className = 'run-cancel-btn';
         tl.type = 'button';
         tl.textContent = 'Timeline';
-        tl.title = 'Agent tree with Jevora/Laya verdicts';
+        tl.title = 'Agent tree with Jevora verdicts';
         tl.addEventListener('click', () => window.jevoraOpenTimeline?.(this.runId));
         const diffBtn = document.createElement('button');
         diffBtn.className = 'run-cancel-btn';
@@ -1258,8 +1273,18 @@ document.addEventListener('DOMContentLoaded', () => {
       this.finished = true;
       this.setStatus(run.status);
       this.typingEl.style.display = 'none';
+      const stopped = run.cancelled || /cancel/i.test(run.error || '');
+      const partial = this.streamed.trim();
       this.streamEl.textContent = '';
-      this.finalEl.innerHTML = renderMarkdown(run.final_output || 'The run completed without an output.');
+      this.finalEl.innerHTML = renderMarkdown(stopped && partial ? this.streamed
+        : (run.final_output || 'The run completed without an output.'));
+      if (stopped) {
+        const note = document.createElement('div');
+        note.className = 'drawer-muted';
+        note.style.cssText = 'font-size:11px;margin-top:6px';
+        note.textContent = 'Generation stopped.';
+        this.finalEl.appendChild(note);
+      }
       this.el.querySelector('.message-actions')?.remove();
       const bubbleContent = this.finalEl.parentElement || this.finalEl.parent || this.el;
       const sourceHtml = renderSources(run.meta?.sources || []);

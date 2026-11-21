@@ -60,9 +60,12 @@ def feedback_from(evidence: Evidence, reason: str) -> str:
 
 async def verifier(o: Orchestrator, state: GraphState) -> dict[str, Any]:
     rc = ctx_for(o, state)
+    mode = state["mode"]
+    if mode == "chat" and not state.get("command"):
+        # Plain chats are normal conversations: no verification loops, no decisions.
+        return {"verification": None, "escalation": None}
     await set_status(o, state, "verifying")
     evidence = evidence_of(state)
-    mode = state["mode"]
     iteration = int(state.get("iteration", 0))
     ceiling = int(state.get("max_iterations", o.app.settings.iteration_ceiling))
     decisions = o.app.decisions

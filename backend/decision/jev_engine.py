@@ -1,6 +1,6 @@
-"""JevEngine: optional fallback via TypeSafe's hosted Jev API (same interface; graceful when unavailable).
+"""JevEngine: the primary model-backed Decision Engine via TypeSafe's hosted Jev API.
 
-Jev is waitlisted; when ``JEV_API_URL``/``JEV_API_KEY`` are not configured, or the service is down,
+When ``JEV_API_URL``/``JEV_API_KEY`` are not configured, or the service is down,
 ``available()`` is False and the ensemble falls through to the RulesEngine.
 """
 
@@ -13,7 +13,7 @@ import httpx
 
 from backend.core.logging import get_logger
 from backend.decision.interface import DecisionEngine, EngineUnavailable
-from backend.decision.laya_engine import laya_questions, state_text
+from backend.decision.questions import decision_questions, state_text
 from backend.decision.schemas import DecisionQuestion, DecisionResult, Evidence
 
 log = get_logger(__name__)
@@ -48,7 +48,7 @@ class JevEngine(DecisionEngine):
         if not self.url or not self.api_key:
             raise EngineUnavailable("Jev is not configured (JEV_API_URL / JEV_API_KEY)")
         started = time.perf_counter()
-        body = {"state": state_text(question, evidence), "questions": laya_questions(question)}
+        body = {"state": state_text(question, evidence), "questions": decision_questions(question)}
         try:
             response = await self.client.post(f"{self.url}/v1/decide", json=body, timeout=self.timeout,
                                               headers={"Authorization": f"Bearer {self.api_key}"})
